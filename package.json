@@ -3,7 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "description": "Test rich text editors against a real Android or iOS keyboard",
+  "homepage": "https://github.com/portabletext/thumbjar#readme",
+  "bugs": {
+    "url": "https://github.com/portabletext/thumbjar/issues"
+  },
   "license": "MIT",
+  "author": "Sanity.io <hello@sanity.io>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/portabletext/thumbjar.git"
+  },
   "bin": {
     "thumbjar": "./bin/thumbjar.js"
   },
