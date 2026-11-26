@@ -62,8 +62,10 @@
   },
   "scripts": {
     "build": "pkg-utils build --strict --check",
+    "check:format": "oxfmt --check .",
     "check:types": "tsc --noEmit --pretty --project tsconfig.json && tsc --noEmit --pretty --project tsconfig.page.json",
     "clean": "del dist && del out && del node_modules",
+    "format": "oxfmt .",
     "test:unit": "vitest run"
   },
   "dependencies": {
@@ -75,6 +77,7 @@
     "@types/node": "^24",
     "del-cli": "^8.0.1",
     "jsdom": "^27.2.0",
+    "oxfmt": "^0.80.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "webdriverio": "^9.27.1"
