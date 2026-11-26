@@ -1,0 +1,23 @@
+allowBuilds:
+  edgedriver: false
+  esbuild: false
+  geckodriver: false
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - "@portabletext/*"
+  - "@sanity/*"
+  - "@types/*"
+  - "@typescript/*"
+  - csstype
+  - oxlint
+  - "@oxlint/*"
+  - oxfmt
+  - "@oxfmt/*"
+  - fallow@3.48.0
+  - "@fallow-cli/*"
+  - knip@6.48.0
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - rxjs@7.8.2
+  - semver@6.3.1
+  - undici-types@6.21.0
