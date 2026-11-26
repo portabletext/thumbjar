@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/bin.ts!",
+    "src/guard.ts!",
+    "src/prepare/*.ts!",
+    "src/run/*.ts!",
+    "package.config.ts!",
+    "src/device/*.ts",
+    "src/gboard/*.ts",
+    "src/fixtures/suites/*.ts"
+  ],
+  "ignoreBinaries": ["adb"]
+}

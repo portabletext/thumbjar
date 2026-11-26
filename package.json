@@ -63,6 +63,7 @@
   "scripts": {
     "build": "pkg-utils build --strict --check",
     "check:format": "oxfmt --check .",
+    "check:knip": "NODE_OPTIONS=\"$NODE_OPTIONS --conditions=source\" knip",
     "check:lint": "oxlint",
     "check:types": "tsc --noEmit --pretty --project tsconfig.json && tsc --noEmit --pretty --project tsconfig.page.json",
     "clean": "del dist && del out && del node_modules",
@@ -79,6 +80,7 @@
     "@types/node": "^24",
     "del-cli": "^8.0.1",
     "jsdom": "^27.2.0",
+    "knip": "6.48.0",
     "oxfmt": "^0.80.0",
     "oxlint": "^1.95.0",
     "typescript": "^7.0.2",
