@@ -63,19 +63,21 @@
   "scripts": {
     "build": "pkg-utils build --strict --check",
     "check:types": "tsc --noEmit --pretty --project tsconfig.json && tsc --noEmit --pretty --project tsconfig.page.json",
-    "clean": "del .turbo && del dist && del out && del node_modules",
+    "clean": "del dist && del out && del node_modules",
     "test:unit": "vitest run"
   },
   "dependencies": {
     "find-cache-directory": "^6.0.0"
   },
   "devDependencies": {
-    "@sanity/pkg-utils": "catalog:tooling",
-    "@types/node": "catalog:tooling",
-    "jsdom": "catalog:tooling",
-    "typescript": "catalog:tooling",
-    "vitest": "catalog:tooling",
-    "webdriverio": "catalog:tooling"
+    "@sanity/pkg-utils": "^12.3.0",
+    "@types/jsdom": "^27.0.0",
+    "@types/node": "^24",
+    "del-cli": "^8.0.1",
+    "jsdom": "^27.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "webdriverio": "^9.27.1"
   },
   "peerDependencies": {
     "vitest": "^5.0.5",
@@ -88,5 +90,6 @@
   },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "packageManager": "pnpm@12.23.0"
 }
