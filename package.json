@@ -2,6 +2,19 @@
   "name": "thumbjar",
   "version": "1.0.0",
   "description": "Test rich text editors against a real Android or iOS keyboard",
+  "keywords": [
+    "android",
+    "contenteditable",
+    "e2e",
+    "emulator",
+    "gboard",
+    "ime",
+    "ios",
+    "keyboard",
+    "rich-text-editor",
+    "testing",
+    "vitest"
+  ],
   "homepage": "https://github.com/portabletext/thumbjar#readme",
   "bugs": {
     "url": "https://github.com/portabletext/thumbjar/issues"
