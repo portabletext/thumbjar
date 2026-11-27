@@ -94,6 +94,8 @@ jobs:
         run: |
           npm ci
           npm run build
+          # thumbjar run warms Gboard and checks the dictionary on page/editor.html; use the plain control for that.
+          cp page/plain.html page/editor.html
 
       - name: Fetch the uiautomator2 server jar
         timeout-minutes: 4
