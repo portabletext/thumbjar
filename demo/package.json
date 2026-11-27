@@ -1,0 +1,23 @@
+{
+  "name": "thumbjar-demo-slate-vs-pte",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@portabletext/editor": "8.2.17",
+    "@vitejs/plugin-react": "^6.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "slate": "^0.147.4",
+    "slate-history": "^0.144.0",
+    "slate-react": "^0.147.6",
+    "thumbjar": "file:..",
+    "vite": "^8.4.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0"
+  }
+}

@@ -1,0 +1,127 @@
+name: "Demo: Slate vs PTE"
+
+# Scratch measurement, never merged: types the same scenarios on real Gboard into a minimal Slate editor,
+# a minimal Portable Text Editor and a plain `contenteditable` control (`demo/`), and uploads `demo/out`,
+# whose `results.jsonl` holds one line per test. Each attempt is a separate job on a fresh emulator, so
+# `RUNS` repeats the whole matrix.
+
+on:
+  # `workflow_dispatch` cannot start a workflow that exists only on a non-default branch, so a push to
+  # this branch runs it.
+  push:
+    branches: [demo/slate-vs-pte]
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: How many times to run each editor and keyboard, RUNS below when empty
+        type: string
+        required: false
+
+env:
+  # How many times each editor and keyboard runs on a push. Edit to change.
+  RUNS: 3
+
+# A newer push replaces the measurement of an older one.
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  attempts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - id: list
+        env:
+          RUNS: ${{ inputs.runs || env.RUNS }}
+        run: |
+          if ! [[ "$RUNS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "runs must be a positive integer, got '$RUNS'" >&2
+            exit 1
+          fi
+          echo "list=$(seq -s, 1 "$RUNS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  android:
+    name: ${{ matrix.editor }} ${{ matrix.lang }} (${{ matrix.attempt }})
+    needs: attempts
+    runs-on: ubuntu-latest
+    # The run step's cap plus room for the steps around it (install, builds, jar fetch, upload).
+    timeout-minutes: ${{ matrix.jobMinutes }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        editor: [slate, pte, plain]
+        lang: [ja, en]
+        attempt: ${{ fromJSON(needs.attempts.outputs.list) }}
+        # `runMinutes` covers `runStepWorstSeconds` from `thumbjar/vitest` for the row's file, rounded up:
+        # 4144 seconds for `ja` with 4 tests, 5399 for `en` with 6 and 3416 for plain `en` with 3.
+        include:
+          - {lang: ja, runMinutes: 70, jobMinutes: 100}
+          - {lang: en, runMinutes: 90, jobMinutes: 120}
+          - {editor: plain, lang: en, runMinutes: 57, jobMinutes: 90}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install project dependencies
+        timeout-minutes: 8
+        run: pnpm install
+
+      - name: Build thumbjar
+        timeout-minutes: 5
+        run: pnpm build
+
+      - name: Install and build the demo pages
+        timeout-minutes: 8
+        working-directory: demo
+        run: |
+          npm ci
+          npm run build
+
+      - name: Fetch the uiautomator2 server jar
+        timeout-minutes: 4
+        working-directory: demo
+        run: node ../bin/thumbjar.js fetch-u2-jar
+
+      - name: Run on emulator
+        timeout-minutes: ${{ matrix.runMinutes }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis_playstore
+          arch: x86_64
+          # Emulator 37.2.12, as in portabletext/editor: 37.2.13 crashes during guest process cleanup.
+          emulator-build: 16428233
+          profile: pixel_6
+          disable-animations: true
+          ram-size: 4096M
+          cores: 4
+          heap-size: 512M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-boot-timeout: 360
+          working-directory: demo
+          script: node ../bin/thumbjar.js run tests/${{ matrix.editor }}.${{ matrix.lang }}.test.ts --keyboard ${{ matrix.lang }} --page-dir page --config vitest.config.ts --project device --out-dir out
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: demo-${{ matrix.editor }}-${{ matrix.lang }}-${{ matrix.attempt }}
+          path: demo/out/
