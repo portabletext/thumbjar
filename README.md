@@ -66,7 +66,7 @@ test('kyou converts to 今日', async (context) => {
 })
 ```
 
-Fetch the uiautomator2 server jar once, boot the emulator, then serve the built page in `dist`, prepare the device and run the file in one command.
+Build the page as `dist/editor.html`: `thumbjar run` always prepares the device against `/editor.html`. Fetch the uiautomator2 server jar once, boot the emulator, then serve `dist`, prepare the device and run the file in one command.
 
 ```sh
 npx thumbjar fetch-u2-jar

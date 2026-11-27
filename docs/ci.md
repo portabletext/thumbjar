@@ -85,7 +85,7 @@ These bounds assume adb processes exit after SIGKILL. When one does not, no late
 - `FETCH_U2_JAR_WORST_SECONDS` is the longest `thumbjar fetch-u2-jar` runs.
 - `countDeviceTests(source)` counts the tests in a test file's source.
 
-`thumbjar run` uses `countDeviceTests` and `deviceTestFileSeconds` to cap the test stage. `countDeviceTests` counts `test(` and `test.fails(` calls at the start of a line. When that does not match what Vitest collects, for example with `test.for` or tests generated in a loop, declare the total, skipped tests included.
+`thumbjar run` uses `countDeviceTests` and `deviceTestFileSeconds` to cap the test stage. `countDeviceTests` counts `test(` and `test.fails(` calls at the start of a line. When that does not match what Vitest collects, for example with `test.for` or tests generated in a loop, declare the total, skipped tests included, and keep a collection test that checks the declaration against the count Vitest collects.
 
 ```ts
 // thumbjar-test-count: 13

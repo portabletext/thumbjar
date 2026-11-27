@@ -54,7 +54,7 @@ Prepares a booted emulator for one keyboard. `run` calls it for you.
 - `--out-dir` defaults to `out`.
 - `--booted` is the host's epoch seconds when the emulator came online. Without it, the time preparation started is used.
 
-Preparation disables Play Store updates, waits out system error dialogs after boot, sets up Chrome and the soft keyboard and checks the page URL.
+Preparation attempts to disable Play Store updates, waits out system error dialogs after boot, sets up Chrome and the soft keyboard and checks the page URL.
 
 For `ja`, it adds Gboard's Japanese QWERTY layout and waits for this boot's dictionary load, at most 360 seconds after `--booted`. It then switches Gboard to Japanese and checks that typing `kyou` offers conversion candidates.
 
@@ -63,8 +63,8 @@ For `en`, it types `hello` and Space into the page so Chrome and Gboard are past
 `prepare` exits with these statuses.
 
 - `0` when the device is ready.
-- `1` when preparation failed.
-- `2` when a flag is missing or invalid.
+- `1` when preparation failed, or when an argument cannot be parsed, such as a flag without a value or an unknown flag.
+- `2` when a required flag is missing or a value is invalid.
 - `3` when the Japanese dictionary never loaded.
 - `130`, `129` or `143` on `SIGINT`, `SIGHUP` or `SIGTERM`.
 
