@@ -20,6 +20,7 @@ import {
   type RenderLeafProps,
 } from 'slate-react'
 import {recordInput} from 'thumbjar/page'
+import {big, fontSize, heading} from './big.ts'
 import {caretOffset, initialRuns, locate, settle} from './seed.ts'
 
 type ParagraphElement = {type: 'paragraph'; children: CustomText[]}
@@ -89,12 +90,13 @@ function App() {
 
   return (
     <Slate editor={editor} initialValue={initialValue}>
+      {big ? <h1 style={{fontSize: 28}}>{heading('slate')}</h1> : null}
       <Editable
         aria-label="Rich text editor"
         renderElement={renderElement}
         renderLeaf={renderLeaf}
         spellCheck
-        style={{border: '1px solid #888', minHeight: '3em', fontSize: 20}}
+        style={{border: '1px solid #888', minHeight: '3em', fontSize}}
       />
     </Slate>
   )

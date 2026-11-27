@@ -17,6 +17,7 @@ import {
 import {useEffect} from 'react'
 import {createRoot} from 'react-dom/client'
 import {recordInput} from 'thumbjar/page'
+import {big, fontSize, heading} from './big.ts'
 import {caretOffset, initialRuns, settle} from './seed.ts'
 
 const schemaDefinition = defineSchema({
@@ -100,8 +101,9 @@ function App() {
     >
       <NodePlugin nodes={nodes} />
       <Probe />
+      {big ? <h1 style={{fontSize: 28}}>{heading('pte')}</h1> : null}
       <PortableTextEditable
-        style={{border: '1px solid #888', minHeight: '3em', fontSize: 20}}
+        style={{border: '1px solid #888', minHeight: '3em', fontSize}}
       />
     </EditorProvider>
   )
