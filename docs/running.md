@@ -68,6 +68,24 @@ For `en`, it types `hello` and Space into the page so Chrome and Gboard are past
 - `3` when the Japanese dictionary never loaded.
 - `130`, `129` or `143` on `SIGINT`, `SIGHUP` or `SIGTERM`.
 
+## thumbjar ci android run
+
+```sh
+npx thumbjar ci android run tests/ja.test.ts --keyboard ja --page-dir dist --config vitest.config.ts --project device
+```
+
+What the [Android GitHub action](ci.md#the-github-action) runs inside the emulator runner. It is `thumbjar run` with the same flags, defaults and exit statuses.
+
+## thumbjar ci android retry
+
+```sh
+npx thumbjar ci android retry --out-dir out
+```
+
+Decides, after a failed run in CI, whether to run once more on a fresh emulator. It reads `<out-dir>/timing.txt` and needs no device. `--out-dir` defaults to `out`.
+
+It exits with `0` when the emulator never booted, adb lost the device after boot, or Gboard's Japanese dictionary never loaded on a device that was still reachable. It then appends a `RETRY` line to `timing.txt`, so the retry's lines follow it. It exits with `1` after any other failure, a test failure included, and when `timing.txt` already holds a `RETRY` line. It prints one line saying why.
+
 ## Artifacts
 
 `runOnDevice` writes to the project's `outDir`, `out` by default. File names start with the keyboard and the test name in lowercase with dashes, such as `ja-kyou-converts-to.json`. A leading `Scenario: ` is dropped. Retry artifacts add `-retry`.

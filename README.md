@@ -79,7 +79,7 @@ npx thumbjar run tests/ja.test.ts --keyboard ja --page-dir dist --config vitest.
 - [Configuring Vitest](docs/vitest.md): `deviceProject`, global setup and the setup file.
 - [Writing cases](docs/cases.md): `runOnDevice`, steps, `Run` and `StepRecord`, retries.
 - [Running tests](docs/running.md): the `thumbjar` command and the artifacts it writes.
-- [CI on GitHub Actions](docs/ci.md): the emulator job, time budgets and flakes.
+- [CI on GitHub Actions](docs/ci.md): the `portabletext/thumbjar/android` action, the manual emulator job, time budgets and flakes.
 - [iOS Simulator](docs/ios.md): the Appium backend and what it supports.
 - [Host setup](docs/host.md): Linux, macOS and the emulator image.
 
