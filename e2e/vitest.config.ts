@@ -8,6 +8,9 @@ import {defineConfig} from 'vitest/config'
  */
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
+  // Vitest puts its results cache in `node_modules/.vite` under `root`. A `node_modules` here would make npm take this
+  // directory as the package, where `npx --no thumbjar` in `android/action.yml` cannot find thumbjar's own bin.
+  cacheDir: fileURLToPath(new URL('../node_modules/.vite', import.meta.url)),
   test: {
     reporters:
       process.env.GITHUB_ACTIONS === 'true'
