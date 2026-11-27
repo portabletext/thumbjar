@@ -1,0 +1,9 @@
+{
+  // The device tests import `thumbjar` by name, resolved to `src` so they type-check without a build.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "customConditions": ["source"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": []
+}

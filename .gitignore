@@ -9,3 +9,5 @@ node_modules
 out
 *.tgz
 coverage
+e2e/page/page.js
+e2e/page/page.js.map

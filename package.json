@@ -74,11 +74,12 @@
   },
   "scripts": {
     "build": "pkg-utils build --strict --check",
+    "build:e2e": "cp dist/page.js dist/page.js.map e2e/page/",
     "check:fallow": "fallow dead-code",
     "check:format": "oxfmt --check .",
     "check:knip": "NODE_OPTIONS=\"$NODE_OPTIONS --conditions=source\" knip",
     "check:lint": "oxlint",
-    "check:types": "tsc --noEmit --pretty --project tsconfig.json && tsc --noEmit --pretty --project tsconfig.page.json",
+    "check:types": "tsc --noEmit --pretty --project tsconfig.json && tsc --noEmit --pretty --project tsconfig.page.json && tsc --noEmit --pretty --project e2e/tsconfig.json",
     "clean": "del dist && del out && del node_modules",
     "format": "oxfmt .",
     "lint:fix": "oxlint --fix",

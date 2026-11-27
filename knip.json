@@ -8,7 +8,9 @@
     "package.config.ts!",
     "src/device/*.ts",
     "src/gboard/*.ts",
-    "src/fixtures/suites/*.ts"
+    "src/fixtures/suites/*.ts",
+    "e2e/vitest.config.ts!",
+    "e2e/tests/*.test.ts"
   ],
   "ignoreBinaries": ["adb"]
 }

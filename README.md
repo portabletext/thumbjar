@@ -59,6 +59,8 @@ thumbjar runs on Linux and macOS without GNU coreutils. For Linux x86_64, use an
 
 For CI, provision the SDK, image, Chrome and Gboard on your runner. Boot the emulator yourself and keep the built test page served while tests run. thumbjar prepares a booted device. It does not boot one.
 
+thumbjar's own [`.github/workflows/device.yml`](.github/workflows/device.yml) is a working example: it runs `e2e/` on an API 36 emulator and checks that thumbjar catches the planted input bug in `e2e/page/beforeinput.html`.
+
 ## First run
 
 Download the pinned uiautomator2 server jar before booting the emulator. Run this command from the package you run Vitest in, so the tests find the cached jar:
