@@ -146,8 +146,7 @@ jobs:
     # Gboard's Shift state before the first letter. Results in `out/probe-results.jsonl`, evidence per run in
     # `out/probe/<case>-<run>/`, Chrome and Gboard versions in `out/probe-versions.txt`.
     name: probe android-${{ matrix.api }}
-    # Off: run 46009695901 answered the placeholder question. Set to `true` to probe again.
-    if: ${{ false }}
+    # On: EDEX-3359, the editor with the placeholder after the text span (`demo/vendor/`). Run 46009695901 is the before.
     runs-on: ubuntu-latest
     # `runStepWorstSeconds('en', 6)` is 5399 s; the file's own cap is 4066 s.
     timeout-minutes: 120
@@ -212,7 +211,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           emulator-boot-timeout: 360
           working-directory: demo
-          script: node ../bin/thumbjar.js run tests/probe.test.ts --keyboard en --page-dir page --config vitest.config.ts --project device --out-dir out
+          script: PROBE_CASES=plain,pte,pte-placeholder,pte-placeholder-uninitialised node ../bin/thumbjar.js run tests/probe.test.ts --keyboard en --page-dir page --config vitest.config.ts --project device --out-dir out
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -222,6 +221,8 @@ jobs:
           path: demo/out/
 
   record:
+    # Off while the probe checks EDEX-3359; `compose` needs it and skips too.
+    if: ${{ false }}
     name: record ${{ matrix.editor }}
     runs-on: ubuntu-latest
     # `runStepWorstSeconds('en', 4)` from `thumbjar/vitest` is 4077 seconds: the record files declare four
