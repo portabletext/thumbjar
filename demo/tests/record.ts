@@ -34,6 +34,27 @@ async function adb(args: string[], seconds = 30): Promise<void> {
   await execFileAsync('adb', args, {timeout: seconds * 1000})
 }
 
+/** Send SIGINT to screenrecord on the device and wait up to 20 s for it to exit, and say what happened. */
+async function stopRecorder(): Promise<string> {
+  try {
+    await adb(['shell', 'kill -INT $(pidof screenrecord)'], 10)
+  } catch (caught) {
+    return `kill failed: ${caught instanceof Error ? caught.message : String(caught)}`
+  }
+  for (let waited = 0; waited < 20_000; waited += 500) {
+    const {stdout} = await execFileAsync(
+      'adb',
+      ['shell', 'pidof screenrecord || true'],
+      {timeout: 10_000},
+    )
+    if (stdout.trim() === '') {
+      return `exited after ${waited} ms`
+    }
+    await sleep(500)
+  }
+  return 'still running after 20 s'
+}
+
 /**
  * Declare the one recording test for `editor`: type `hello` Space `world` Space into an empty field on
  * English Gboard while `adb shell screenrecord` records the screen, then pull the video to
@@ -97,12 +118,11 @@ export function defineRecording(
       } finally {
         // Let the last frame with the committed text land in the video.
         await sleep(2000)
-        // SIGINT on the device makes screenrecord write the mp4's moov atom; SIGINT to the local adb
-        // client alone may only hang up the shell. Then wait for adb to exit and the file to be finalized.
-        await adb(['shell', 'pkill', '-INT', 'screenrecord'], 10).catch(
-          () => undefined,
-        )
-        recorder.kill('SIGINT')
+        // SIGINT on the device makes screenrecord write the mp4's moov atom. Wait until it has exited
+        // on the device before touching the local adb client: hanging up the shell first sends SIGHUP,
+        // which kills screenrecord without finalizing the file (run 46001477244: moov atom not found).
+        const stopped = await stopRecorder()
+        console.log(`record ${editor}: screenrecord ${stopped}`)
         await Promise.race([exited, sleep(10_000)])
         if (recorder.exitCode === null && recorder.signalCode === null) {
           recorder.kill('SIGKILL')
