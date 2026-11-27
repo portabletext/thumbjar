@@ -1,0 +1,120 @@
+name: thumbjar Android
+description: Run a thumbjar device test file on real Gboard in an Android emulator, retrying once on a fresh emulator when the first one fails as infrastructure.
+
+# Run after checkout, Node setup, the install that brings in `thumbjar` and the build of the page under test. The
+# emulator runner owns the emulator, so a second boot needs a second runner step: `thumbjar ci android retry` decides
+# from `timing.txt` whether the first run failed as infrastructure, and only then does the second step run.
+#
+# Composite steps take no `timeout-minutes`: put it on the step that uses this action, covering two runs.
+
+inputs:
+  test:
+    description: The device test file, relative to `working-directory`.
+    required: true
+  keyboard:
+    description: The keyboard to prepare, `ja` or `en`.
+    required: true
+  working-directory:
+    description: The package to run in, the one that depends on `thumbjar` and holds the Vitest config.
+    default: .
+  page-dir:
+    description: The built page directory `thumbjar serve` serves, relative to `working-directory`.
+    default: dist
+  config:
+    description: The Vitest config, relative to `working-directory`.
+    default: vitest.config.ts
+  project:
+    description: The Vitest project with the device tests.
+    default: device
+  out-dir:
+    description: Where thumbjar writes its diagnostics, relative to `working-directory`. Uploaded as an artifact.
+    default: out
+  artifact-name:
+    description: The artifact's name, `thumbjar-android-<keyboard>-<run attempt>` unless given. Give each job its own.
+    default: ""
+  api-level:
+    description: The emulator's Android API level.
+    default: "36"
+  emulator-build:
+    description: The emulator build to install.
+    # Emulator 37.2.12, as in portabletext/editor: 37.2.13 crashes during guest process cleanup.
+    default: "16428233"
+
+runs:
+  using: composite
+  steps:
+    - name: Enable KVM group perms
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Fetch the uiautomator2 server jar
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npx --no thumbjar fetch-u2-jar
+
+    - name: Run on emulator
+      id: run1
+      continue-on-error: true
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: google_apis_playstore
+        arch: x86_64
+        emulator-build: ${{ inputs.emulator-build }}
+        profile: pixel_6
+        disable-animations: true
+        ram-size: 4096M
+        cores: 4
+        heap-size: 512M
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        emulator-boot-timeout: 360
+        working-directory: ${{ inputs.working-directory }}
+        script: npx --no thumbjar ci android run "${{ inputs.test }}" --keyboard "${{ inputs.keyboard }}" --page-dir "${{ inputs.page-dir }}" --config "${{ inputs.config }}" --project "${{ inputs.project }}" --out-dir "${{ inputs.out-dir }}"
+
+    # The emulator sometimes never comes online, adb loses it after boot, or Gboard's Japanese dictionary never loads
+    # on that boot. Exits 0 to retry once on a fresh emulator then, never after a test failure on a reachable device.
+    - name: Decide the retry
+      id: retry
+      if: steps.run1.outcome == 'failure'
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npx --no thumbjar ci android retry --out-dir "${{ inputs.out-dir }}"
+
+    - name: Run on emulator (retry)
+      id: run2
+      if: steps.retry.outcome == 'success'
+      continue-on-error: true
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: google_apis_playstore
+        arch: x86_64
+        emulator-build: ${{ inputs.emulator-build }}
+        profile: pixel_6
+        disable-animations: true
+        ram-size: 4096M
+        cores: 4
+        heap-size: 512M
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        emulator-boot-timeout: 360
+        working-directory: ${{ inputs.working-directory }}
+        script: npx --no thumbjar ci android run "${{ inputs.test }}" --keyboard "${{ inputs.keyboard }}" --page-dir "${{ inputs.page-dir }}" --config "${{ inputs.config }}" --project "${{ inputs.project }}" --out-dir "${{ inputs.out-dir }}"
+
+    - name: Upload the diagnostics
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name || format('thumbjar-android-{0}-{1}', inputs.keyboard, github.run_attempt) }}
+        path: ${{ inputs.working-directory }}/${{ inputs.out-dir }}/
+
+    # The run steps continue on error so the retry can follow. This fails the action when the last run failed.
+    - name: Result
+      if: always() && steps.run1.outcome == 'failure' && steps.run2.outcome != 'success'
+      shell: bash
+      run: |
+        echo "::error::thumbjar failed on the emulator${{ steps.run2.outcome == 'failure' && ', on the retry too' || '' }}, see the run step's log and the uploaded diagnostics"
+        exit 1
