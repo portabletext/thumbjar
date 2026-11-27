@@ -7,6 +7,7 @@ import {
   EditorProvider,
   PortableTextEditable,
   useEditor,
+  type RenderPlaceholderFunction,
 } from '@portabletext/editor'
 import {NodePlugin} from '@portabletext/editor/plugins'
 import {
@@ -35,6 +36,18 @@ const nodes = [
 // Deterministic keys, like the editor's own page uses `createTestKeyGenerator`.
 let keyCount = 0
 const keyGenerator = () => `k${keyCount++}`
+
+// `placeholder=1` passes `renderPlaceholder` exactly as portabletext/editor's playground does
+// (apps/playground/src/editor.tsx), so its `Type something` span renders in the empty block.
+// `initial=none` starts the editor without `initialValue`, as the playground's editors start with an
+// undefined value, instead of with one empty block.
+const params = new URLSearchParams(location.search)
+const placeholder = params.get('placeholder') === '1'
+const noInitialValue = params.get('initial') === 'none'
+
+const renderPlaceholder: RenderPlaceholderFunction = () => (
+  <span className="text-gray-400 dark:text-gray-500">Type something</span>
+)
 
 const initialValue = [
   {
@@ -97,13 +110,18 @@ function Probe() {
 function App() {
   return (
     <EditorProvider
-      initialConfig={{schemaDefinition, initialValue, keyGenerator}}
+      initialConfig={
+        noInitialValue
+          ? {schemaDefinition, keyGenerator}
+          : {schemaDefinition, initialValue, keyGenerator}
+      }
     >
       <NodePlugin nodes={nodes} />
       <Probe />
       {big ? <h1 style={{fontSize: 28}}>{heading('pte')}</h1> : null}
       <PortableTextEditable
         style={{border: '1px solid #888', minHeight: '3em', fontSize}}
+        {...(placeholder ? {renderPlaceholder} : {})}
       />
     </EditorProvider>
   )

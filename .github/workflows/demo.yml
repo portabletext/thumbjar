@@ -138,8 +138,90 @@ jobs:
           name: demo-${{ matrix.editor }}-${{ matrix.lang }}-${{ matrix.attempt }}
           path: demo/out/
 
+  probe:
+    # The PTE playground first-word question: `demo/tests/probe.ts` taps into an empty editor and types
+    # `hello` Space `world` Space, 3 runs of each case (demo PTE with and without the playground's
+    # placeholder and initial value, a plain control and https://playground.portabletext.org/), and records
+    # Gboard's Shift state before the first letter. Results in `out/probe-results.jsonl`, evidence per run in
+    # `out/probe/<case>-<run>/`, Chrome and Gboard versions in `out/probe-versions.txt`.
+    name: probe android-${{ matrix.api }}
+    runs-on: ubuntu-latest
+    # `runStepWorstSeconds('en', 6)` is 5399 s; the file's own cap is 4066 s.
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 37.0 is the newest x86_64 Play Store image without 16 KB pages. It needs emulator 37.2.11 or later
+        # (its `emulator` dependency in Google's sys-img2 repository), which the pinned 37.2.12 meets.
+        api: ['36', '37.0']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install project dependencies
+        timeout-minutes: 8
+        run: pnpm install
+
+      - name: Build thumbjar
+        timeout-minutes: 5
+        run: pnpm build
+
+      - name: Install and build the demo pages
+        timeout-minutes: 8
+        working-directory: demo
+        run: |
+          npm ci
+          npm run build
+          # thumbjar run warms Gboard and checks the dictionary on page/editor.html; use the plain control for that.
+          cp page/plain.html page/editor.html
+
+      - name: Fetch the uiautomator2 server jar
+        timeout-minutes: 4
+        working-directory: demo
+        run: node ../bin/thumbjar.js fetch-u2-jar
+
+      - name: Probe on emulator
+        timeout-minutes: 90
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis_playstore
+          arch: x86_64
+          # Emulator 37.2.12, as in portabletext/editor: 37.2.13 crashes during guest process cleanup.
+          emulator-build: 16428233
+          profile: pixel_6
+          disable-animations: true
+          ram-size: 4096M
+          cores: 4
+          heap-size: 512M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-boot-timeout: 360
+          working-directory: demo
+          script: node ../bin/thumbjar.js run tests/probe.test.ts --keyboard en --page-dir page --config vitest.config.ts --project device --out-dir out
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: probe-android-${{ matrix.api }}
+          path: demo/out/
+
   record:
     name: record ${{ matrix.editor }}
+    # Off while the probe is the point; set to `true` to record again. Skipping it also skips `compose`.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     # `runStepWorstSeconds('en', 2)` from `thumbjar/vitest` is 2755 seconds: the record files declare two
     # tests so the cap covers the one test's longer timeout (see `demo/tests/record.ts`). The job adds room
