@@ -146,7 +146,7 @@ jobs:
     # Gboard's Shift state before the first letter. Results in `out/probe-results.jsonl`, evidence per run in
     # `out/probe/<case>-<run>/`, Chrome and Gboard versions in `out/probe-versions.txt`.
     name: probe android-${{ matrix.api }}
-    # On: EDEX-3359 control, the same probe on the published editor 8.2.17 (placeholder before the span).
+    # On: EDEX-3359, the editor with the placeholder after the text span and margin-top -1lh (`demo/vendor/`). Run 46009695901 is the before.
     runs-on: ubuntu-latest
     # `runStepWorstSeconds('en', 6)` is 5399 s; the file's own cap is 4066 s.
     timeout-minutes: 120
