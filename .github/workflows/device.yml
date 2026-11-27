@@ -1,8 +1,10 @@
 name: Device tests
 
 # Types on real Gboard in an Android emulator into the pages in `e2e/page`, so thumbjar's own CI
-# shows it both passes a correct page and catches a page with a planted input bug. Each job boots a
-# fresh emulator, prepares it for its row's language with `thumbjar run` and runs that row's test file.
+# shows it both passes a correct page and catches a page with a planted input bug. Each job runs the
+# `android/` action from this checkout, which boots a fresh emulator, prepares it for its row's language with
+# `thumbjar ci android run` and runs that row's test file, once more on a fresh emulator when the first never booted,
+# lost adb or never loaded Gboard's Japanese dictionary.
 # Not a required check.
 
 on:
@@ -22,26 +24,22 @@ jobs:
   android:
     name: Android (${{ matrix.lang }})
     runs-on: ubuntu-latest
-    # The run step's cap plus room for the steps around it.
-    timeout-minutes: 90
+    # The `ja` row's action cap plus room for the steps before it.
+    timeout-minutes: 155
 
     strategy:
       fail-fast: false
       matrix:
-        # `runMinutes` covers `runStepWorstSeconds` from `thumbjar/vitest` for the row's file:
-        # 59 minutes for `ja` with 3 tests and 46 for `en` with 2.
+        # A run's cap covers `runStepWorstSeconds` from `thumbjar/vitest` for the row's file: 62 minutes for
+        # `ja` with 3 tests (59 worst) and 50 for `en` with 2 (46 worst). Composite steps take no cap of their own,
+        # so `actionMinutes` covers two runs, as with a retry, plus 4 for the jar, 5 for the upload and 1 for the
+        # rest.
         include:
-          - {lang: ja, runMinutes: 62}
-          - {lang: en, runMinutes: 50}
+          - {lang: ja, actionMinutes: 134}
+          - {lang: en, actionMinutes: 110}
 
     steps:
       - uses: actions/checkout@v7
-
-      - name: Enable KVM group perms
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
 
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
@@ -58,33 +56,14 @@ jobs:
           pnpm build
           pnpm build:e2e
 
-      - name: Fetch the uiautomator2 server jar
-        timeout-minutes: 4
-        working-directory: e2e
-        run: node ../bin/thumbjar.js fetch-u2-jar
-
+      # KVM, the uiautomator2 jar, the emulator run with one retry when the first emulator fails as infrastructure,
+      # and the `e2e/out/` upload.
       - name: Run on emulator
-        timeout-minutes: ${{ matrix.runMinutes }}
-        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: ${{ matrix.actionMinutes }}
+        uses: ./android
         with:
-          api-level: 36
-          target: google_apis_playstore
-          arch: x86_64
-          # Emulator 37.2.12, as in portabletext/editor: 37.2.13 crashes during guest process cleanup.
-          emulator-build: 16428233
-          profile: pixel_6
-          disable-animations: true
-          ram-size: 4096M
-          cores: 4
-          heap-size: 512M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          emulator-boot-timeout: 360
+          test: tests/${{ matrix.lang }}.test.ts
+          keyboard: ${{ matrix.lang }}
           working-directory: e2e
-          script: node ../bin/thumbjar.js run tests/${{ matrix.lang }}.test.ts --keyboard ${{ matrix.lang }} --page-dir page --config vitest.config.ts --project device --out-dir out
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        timeout-minutes: 5
-        with:
-          name: device-android-${{ matrix.lang }}-${{ github.run_attempt }}
-          path: e2e/out/
+          page-dir: page
+          artifact-name: device-android-${{ matrix.lang }}-${{ github.run_attempt }}
