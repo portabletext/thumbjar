@@ -2,7 +2,79 @@
 
 Device tests run on GitHub's `ubuntu-latest` runners with an x86_64 Android emulator. thumbjar's own [`.github/workflows/device.yml`](../.github/workflows/device.yml) is a working example. It runs `e2e/` and checks that thumbjar both passes a correct page and catches the planted input bug in `e2e/page/beforeinput.html`.
 
-## The job
+## The GitHub action
+
+The `portabletext/thumbjar/android` action boots the emulator, runs one device test file on it and uploads the diagnostics. It retries once on a fresh emulator when the first one fails as infrastructure. It needs thumbjar 1.1.0 or later installed in `working-directory`.
+
+No release tag contains the action yet. Until one does, reference `@main`. Once 1.1.0 is released, pin the tag that matches your installed thumbjar version, such as `@v1.1.0`.
+
+```yaml
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 155
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {lang: ja, actionMinutes: 134}
+          - {lang: en, actionMinutes: 110}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Run on emulator
+        timeout-minutes: ${{ matrix.actionMinutes }}
+        uses: portabletext/thumbjar/android@main
+        with:
+          test: tests/${{ matrix.lang }}.test.ts
+          keyboard: ${{ matrix.lang }}
+```
+
+Run the action after checkout, Node setup, the install that brings in `thumbjar` and the build that writes `editor.html` into the page directory. Swap `npm ci` and `npm run build` for your package manager and page build. It enables KVM, runs `thumbjar fetch-u2-jar`, then runs `thumbjar ci android run` inside [`reactivecircus/android-emulator-runner`](https://github.com/ReactiveCircus/android-emulator-runner) with the same emulator settings as [the manual job](#the-manual-job).
+
+### Inputs
+
+| Input               | Default                                     |                                                                                                 |
+| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `test`              | required                                    | The device test file, relative to `working-directory`.                                          |
+| `keyboard`          | required                                    | `ja` or `en`.                                                                                   |
+| `working-directory` | `.`                                         | The package that depends on `thumbjar` and holds the Vitest config.                             |
+| `page-dir`          | `dist`                                      | The built page directory, a direct child of `working-directory`. It must contain `editor.html`. |
+| `config`            | `vitest.config.ts`                          | The Vitest config, relative to `working-directory`.                                             |
+| `project`           | `device`                                    | The Vitest project with the device tests.                                                       |
+| `out-dir`           | `out`                                       | Where the CLI writes its logs, relative to `working-directory`. It is uploaded as an artifact.  |
+| `artifact-name`     | `thumbjar-android-<keyboard>-<run attempt>` | The artifact's name. Give each job its own.                                                     |
+| `api-level`         | `36`                                        | The emulator's Android API level.                                                               |
+| `emulator-build`    | `16428233`                                  | The emulator build to install.                                                                  |
+
+thumbjar reads the test file relative to the page directory's parent to work out its time budget, so `page-dir` must sit directly in `working-directory`, next to the tests. A nested one such as `build/web` fails before the emulator starts.
+
+`out-dir` only moves the CLI's own logs. The per-test diagnostics go to `deviceProject`'s `outDir`, so if you change one, set the other to match, or those files miss the artifact.
+
+### The retry
+
+When the first run fails, `thumbjar ci android retry` reads `timing.txt` and the action runs once more on a fresh emulator only when one of these happened.
+
+- The emulator never booted.
+- adb lost the device after boot.
+- Gboard's Japanese dictionary never loaded on a device that was still reachable.
+
+A test failure on a reachable device is never retried, and a retry is never retried. The action fails when its last run failed. Both runs write to the same `out-dir`, and the artifact is uploaded either way.
+
+### The step cap
+
+Composite actions take no `timeout-minutes` of their own, so set it on the step that uses the action. It must cover two runs, the first and the retry, plus the jar fetch and the upload. thumbjar's own workflow budgets 62 minutes per run for `ja` with 3 tests and 50 for `en` with 2, so the step gets 134 and 110 minutes: two runs plus 4 for the jar, 5 for the upload and 1 for the rest. See [time budgets](#time-budgets) for what one run must cover.
+
+## The manual job
+
+To run the emulator yourself, without the action's retry, use the emulator runner directly.
 
 ```yaml
 jobs:
@@ -59,7 +131,7 @@ jobs:
           path: out/
 ```
 
-The KVM step lets the runner's user open `/dev/kvm`, so the emulator runs with hardware acceleration.
+The KVM step lets the runner's user open `/dev/kvm`, so the emulator runs with hardware acceleration. Set `runMinutes` to one run's cap, as described below.
 
 `emulator-build: 16428233` pins emulator 37.2.12. Emulator 37.2.13 crashes during guest process cleanup.
 
