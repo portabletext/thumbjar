@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>good</title>
+  <div
+    id="ed"
+    contenteditable="true"
+    style="border: 1px solid #888; min-height: 3em; font-size: 20px"
+  ></div>
+  <pre id="log" style="font-size: 10px"></pre>
+  <script type="module">
+    // The correct page: seed the field from `prefix`, then leave it to the keyboard.
+    import {recordInput} from './page.js'
+
+    const field = document.getElementById('ed')
+    field.textContent = new URL(location.href).searchParams.get('prefix') ?? ''
+    recordInput({field, getText: () => field.textContent})
+  </script>
+</html>

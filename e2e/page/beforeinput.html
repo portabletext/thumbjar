@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>beforeinput</title>
+  <div
+    id="ed"
+    contenteditable="true"
+    style="border: 1px solid #888; min-height: 3em; font-size: 20px"
+  ></div>
+  <pre id="log" style="font-size: 10px"></pre>
+  <script type="module">
+    // The planted bug: the page keeps its own text and updates it from `beforeinput` the desktop way,
+    // appending each event's `data`. During a composition `data` is the whole composition so far, not
+    // what was added, so the page's text drifts from the field's. The DOM is left to the keyboard.
+    import {recordInput} from './page.js'
+
+    const field = document.getElementById('ed')
+    let value = new URL(location.href).searchParams.get('prefix') ?? ''
+    field.textContent = value
+    field.addEventListener('beforeinput', (event) => {
+      value += event.data ?? ''
+    })
+    recordInput({field, getText: () => value})
+  </script>
+</html>
