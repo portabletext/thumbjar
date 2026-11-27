@@ -6,6 +6,11 @@ description: Run a thumbjar device test file on real Gboard in an Android emulat
 # from `timing.txt` whether the first run failed as infrastructure, and only then does the second step run.
 #
 # Composite steps take no `timeout-minutes`: put it on the step that uses this action, covering two runs.
+#
+# The system image comes from the actions cache when a run on the default branch saved it, keyed by the revision
+# `sdkmanager` would install now, so the runner's install finds it current. A failed lookup or restore installs as on
+# a miss, and a failed save only skips the cache. After the runs, `thumbjar ci android check-emulator` fails the action
+# unless the SDK's emulator, the one the runner launched, is the pinned `emulator-build`.
 
 inputs:
   test:
@@ -55,6 +60,31 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: npx --no thumbjar fetch-u2-jar
 
+    - name: Look up the SDK cache key
+      id: sdk-key
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list 2> /dev/null | npx --no thumbjar ci android sdk-cache-key --api "${{ inputs.api-level }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the SDK cache
+      id: sdk-restore
+      if: steps.sdk-key.outputs.key != ''
+      continue-on-error: true
+      uses: actions/cache/restore@v6
+      with:
+        key: ${{ steps.sdk-key.outputs.key }}
+        path: ${{ steps.sdk-key.outputs.path }}
+
+    # The key lookup gives a key only when the SDK had no image, so anything at the path without an exact hit is what
+    # a restore left when it failed part way, which `actions/cache` reports as a warning and a miss. Deleting it keeps
+    # `sdkmanager` from taking a partial image for installed.
+    - name: Clear a missed SDK restore
+      if: steps.sdk-key.outputs.key != '' && steps.sdk-restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: rm -rf "${{ steps.sdk-key.outputs.path }}"
+
     - name: Run on emulator
       id: run1
       continue-on-error: true
@@ -103,6 +133,32 @@ runs:
         emulator-boot-timeout: 360
         working-directory: ${{ inputs.working-directory }}
         script: npx --no thumbjar ci android run "${{ inputs.test }}" --keyboard "${{ inputs.keyboard }}" --page-dir "${{ inputs.page-dir }}" --config "${{ inputs.config }}" --project "${{ inputs.project }}" --out-dir "${{ inputs.out-dir }}"
+
+    # The runner downloads `emulator-build` and unpacks it over the latest emulator in `$ANDROID_HOME/emulator`, which
+    # it launches. A failed download or unpack would leave the latest, which may be the build that crashes.
+    - name: Check the pinned emulator
+      id: emulator-check
+      if: always() && inputs.emulator-build != '' && steps.run1.outcome != 'skipped'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npx --no thumbjar ci android check-emulator --build "${{ inputs.emulator-build }}"
+
+    # Only the default branch saves, so pull requests read its entry and add none. A scheduled run always runs on the
+    # default branch but its event carries no `repository`, so it is matched by its event name. Only an image that
+    # booted an emulator through a passing run on the pinned emulator is saved, never one a cut-off install left
+    # incomplete.
+    - name: Save the SDK cache
+      if: >-
+        always() && steps.sdk-key.outputs.key != '' && steps.sdk-restore.outputs.cache-hit != 'true'
+        && (steps.run1.outcome == 'success' || steps.run2.outcome == 'success')
+        && (inputs.emulator-build == '' || steps.emulator-check.outcome == 'success')
+        && (github.event_name == 'schedule'
+          || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      continue-on-error: true
+      uses: actions/cache/save@v6
+      with:
+        key: ${{ steps.sdk-key.outputs.key }}
+        path: ${{ steps.sdk-key.outputs.path }}
 
     - name: Upload the diagnostics
       if: always()

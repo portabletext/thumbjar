@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The `thumbjar` command. The library never boots the emulator: run these against one that is booted,
-// apart from `fetch-u2-jar` and `ci android retry`, which need no device.
+// apart from `fetch-u2-jar` and the `ci android` commands other than `run`, which need no device.
 
-import {appendFileSync, mkdirSync, readFileSync} from 'node:fs'
+import {appendFileSync, existsSync, mkdirSync, readFileSync} from 'node:fs'
 import {join, resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {localhostPort} from './device/page-url.ts'
@@ -27,7 +27,13 @@ const USAGE = `Usage:
       After a failed \`thumbjar run\` in CI, read <out-dir>/timing.txt and exit 0 when the run should be retried once
       on a fresh emulator: its emulator never booted, adb lost the device, or Gboard's Japanese dictionary never
       loaded. It then appends a \`RETRY\` line, so the retry's lines follow it. Exit 1 after any other failure, a test
-      failure included, and after a retry.`
+      failure included, and after a retry.
+  thumbjar ci android sdk-cache-key --api <level>
+      Read \`sdkmanager --list\` from stdin and print the \`key\` and \`path\` outputs for caching the system image
+      under $ANDROID_HOME, keyed by the revision \`sdkmanager\` would install now. Print nothing when the list has no
+      such image or the SDK already holds one, so the action skips the cache.
+  thumbjar ci android check-emulator --build <id>
+      Exit 1 unless $ANDROID_HOME/emulator/source.properties names emulator build <id>, the one the action pinned.`
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -90,6 +96,63 @@ if (command === 'fetch-u2-jar') {
     process.stdout.write(
       'NO_RETRY: the run failed on a reachable device, or was already a retry\n',
     )
+    process.exitCode = 1
+  }
+} else if (
+  command === 'ci' &&
+  rest[0] === 'android' &&
+  rest[1] === 'sdk-cache-key'
+) {
+  const {values} = parseArgs({
+    args: rest.slice(2),
+    options: {api: {type: 'string'}},
+  })
+  const sdk = process.env.ANDROID_HOME
+  if (values.api === undefined || !/^\d+$/.test(values.api) || !sdk) {
+    usage()
+  }
+  const {sdkCacheKey, systemImagePath} = await import('./run/sdk-cache.ts')
+  const key = sdkCacheKey(
+    readFileSync(0, 'utf8'),
+    values.api,
+    process.env.RUNNER_OS ?? process.platform,
+  )
+  const path = join(sdk, systemImagePath(values.api))
+  if (key === undefined) {
+    console.error(
+      `SDK_CACHE: \`sdkmanager --list\` lists no ${systemImagePath(values.api)} image, skipping the cache`,
+    )
+  } else if (existsSync(path)) {
+    // A restore would overwrite the image the runner image ships.
+    console.error(`SDK_CACHE: the SDK already has ${path}, skipping the cache`)
+  } else {
+    process.stdout.write(`key=${key}\npath=${path}\n`)
+  }
+} else if (
+  command === 'ci' &&
+  rest[0] === 'android' &&
+  rest[1] === 'check-emulator'
+) {
+  const {values} = parseArgs({
+    args: rest.slice(2),
+    options: {build: {type: 'string'}},
+  })
+  const sdk = process.env.ANDROID_HOME
+  if (values.build === undefined || !/^\d+$/.test(values.build) || !sdk) {
+    usage()
+  }
+  const {emulatorMismatch} = await import('./run/emulator-check.ts')
+  const properties = join(sdk, 'emulator', 'source.properties')
+  const mismatch = emulatorMismatch(
+    existsSync(properties) ? readFileSync(properties, 'utf8') : undefined,
+    values.build,
+  )
+  if (mismatch === undefined) {
+    process.stdout.write(
+      `EMULATOR_CHECKED: ${properties} names the pinned build ${values.build}\n`,
+    )
+  } else {
+    process.stdout.write(`EMULATOR_NOT_PINNED: ${mismatch}\n`)
     process.exitCode = 1
   }
 } else {
