@@ -5,8 +5,9 @@ name: "Demo: Slate vs PTE"
 # whose `results.jsonl` holds one line per test. Each attempt is a separate job on a fresh emulator, so
 # `RUNS` repeats the whole matrix.
 #
-# The `record` and `compose` jobs record one Slate and one PTE run of `hello` Space `world` Space on screen and
-# put the two videos side by side in the `slate-vs-pte` artifact.
+# The `record` and `compose` jobs run the Enter scene (`demo/tests/scene.ts`): `hello` Space `world` Space,
+# Gboard's Enter, `hello` Space `again` Space, 3 runs per editor on the android-37.0 image, the first one
+# recorded on screen, and put the two recordings side by side in the `slate-vs-pte` artifact.
 
 on:
   # `workflow_dispatch` cannot start a workflow that exists only on a non-default branch, so a push to
@@ -145,6 +146,8 @@ jobs:
     # Gboard's Shift state before the first letter. Results in `out/probe-results.jsonl`, evidence per run in
     # `out/probe/<case>-<run>/`, Chrome and Gboard versions in `out/probe-versions.txt`.
     name: probe android-${{ matrix.api }}
+    # Off: run 46009695901 answered the placeholder question. Set to `true` to probe again.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     # `runStepWorstSeconds('en', 6)` is 5399 s; the file's own cap is 4066 s.
     timeout-minutes: 120
@@ -154,7 +157,7 @@ jobs:
       matrix:
         # 37.0 is the newest x86_64 Play Store image without 16 KB pages. It needs emulator 37.2.11 or later
         # (its `emulator` dependency in Google's sys-img2 repository), which the pinned 37.2.12 meets.
-        api: ['36', '37.0']
+        api: ["36", "37.0"]
 
     steps:
       - uses: actions/checkout@v7
@@ -220,13 +223,11 @@ jobs:
 
   record:
     name: record ${{ matrix.editor }}
-    # Off while the probe is the point; set to `true` to record again. Skipping it also skips `compose`.
-    if: ${{ false }}
     runs-on: ubuntu-latest
-    # `runStepWorstSeconds('en', 2)` from `thumbjar/vitest` is 2755 seconds: the record files declare two
-    # tests so the cap covers the one test's longer timeout (see `demo/tests/record.ts`). The job adds room
-    # for install, builds, jar fetch and upload.
-    timeout-minutes: 80
+    # `runStepWorstSeconds('en', 4)` from `thumbjar/vitest` is 4077 seconds: the record files declare four
+    # tests so the file's cap (2744 s) covers the version record and three scene runs of at most 360 s
+    # (see `demo/tests/scene.ts`). The job adds room for install, builds, jar fetch and upload.
+    timeout-minutes: 110
 
     strategy:
       fail-fast: false
@@ -270,10 +271,12 @@ jobs:
         run: node ../bin/thumbjar.js fetch-u2-jar
 
       - name: Record on emulator
-        timeout-minutes: 47
+        timeout-minutes: 80
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 36
+          # Chrome 145 and Gboard 17.2 come preinstalled on this image (run 46009695901). It needs emulator
+          # 37.2.11 or later, which the pinned 37.2.12 meets.
+          api-level: "37.0"
           target: google_apis_playstore
           arch: x86_64
           # Emulator 37.2.12, as in portabletext/editor: 37.2.13 crashes during guest process cleanup.

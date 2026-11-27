@@ -2,8 +2,8 @@
 // question: the deployed playground does not capitalise the first word, the demo PTE page does. It does
 // not use `runOnDevice`, which needs thumbjar's recorder in the page, so every case, the demo pages and
 // https://playground.portabletext.org/ alike, is driven the same way: `adb shell input tap` for the tap
-// into the field and every key, the system `uiautomator dump` for Gboard's keys and its Shift state, and
-// a `beforeinput` logger injected over the Chrome DevTools protocol.
+// into the field and every key, a screen dump from thumbjar's uiautomator2 server for Gboard's keys and its
+// Shift state, and a `beforeinput` logger injected over the Chrome DevTools protocol.
 //
 // Per run it writes `out/probe/<case>-<run>/`:
 // - `page-before-tap.json`: focus, selection and the first block's HTML after load, before the tap
@@ -26,9 +26,9 @@ import {test} from 'vitest'
 
 const execFileAsync = promisify(execFile)
 
-const CHROME = 'com.android.chrome'
-const GBOARD = 'com.google.android.inputmethod.latin'
-const CDP_PORT = 9222
+export const CHROME = 'com.android.chrome'
+export const GBOARD = 'com.google.android.inputmethod.latin'
+export const CDP_PORT = 9222
 
 export type ProbeCase = {
   name: string
@@ -77,7 +77,7 @@ export const RUNS = 3
 /** One run's cap: Chrome's start, the page load over the network, the dumps and 12 taps with a dump each. */
 export const RUN_SECONDS = 240
 
-async function adb(args: string[], seconds = 30): Promise<string> {
+export async function adb(args: string[], seconds = 30): Promise<string> {
   const {stdout} = await execFileAsync('adb', args, {
     timeout: seconds * 1000,
     maxBuffer: 64 * 1024 * 1024,
@@ -86,7 +86,7 @@ async function adb(args: string[], seconds = 30): Promise<string> {
   return stdout
 }
 
-async function adbBuffer(args: string[], seconds = 30): Promise<Buffer> {
+export async function adbBuffer(args: string[], seconds = 30): Promise<Buffer> {
   const {stdout} = await execFileAsync('adb', args, {
     timeout: seconds * 1000,
     maxBuffer: 64 * 1024 * 1024,
@@ -95,32 +95,77 @@ async function adbBuffer(args: string[], seconds = 30): Promise<Buffer> {
   return stdout
 }
 
-/** The system uiautomator's dump of the whole screen. */
-async function dumpScreen(): Promise<string> {
+const U2_PORT = 9008
+const U2_JAR = '/data/local/tmp/u2.jar'
+
+/** One JSON-RPC call to thumbjar's uiautomator2 server on the device, through `adb forward`. */
+async function u2(method: string, params: unknown[]): Promise<unknown> {
+  const response = await fetch(`http://127.0.0.1:${U2_PORT}/jsonrpc/0`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({jsonrpc: '2.0', id: 1, method, params}),
+    signal: AbortSignal.timeout(60_000),
+  })
+  const reply = (await response.json()) as {result?: unknown; error?: unknown}
+  if (reply.error !== undefined) {
+    throw new Error(`uiautomator2 ${method}: ${JSON.stringify(reply.error)}`)
+  }
+  return reply.result
+}
+
+async function u2Alive(): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${U2_PORT}/ping`, {
+      signal: AbortSignal.timeout(5000),
+    })
+    return (await response.text()) === 'pong'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Start the uiautomator2 server unless it answers. `thumbjar prepare` pushed its jar to `U2_JAR`. The
+ * server stays up for the file; `adb shell` keeps it running in the background on the device.
+ */
+async function ensureU2(): Promise<void> {
+  await adb(['forward', `tcp:${U2_PORT}`, `tcp:${U2_PORT}`])
+  if (await u2Alive()) {
+    return
+  }
+  await adb([
+    'shell',
+    `CLASSPATH=${U2_JAR} nohup app_process / com.wetest.uia2.Main -p ${U2_PORT} >/dev/null 2>&1 &`,
+  ])
+  for (let check = 0; check < 60; check++) {
+    if (await u2Alive()) {
+      return
+    }
+    await sleep(500)
+  }
+  throw new Error('uiautomator2 server did not answer after 30 s')
+}
+
+/**
+ * The whole screen's accessibility tree, Gboard's window included, from the uiautomator2 server. The
+ * system `uiautomator dump` reads only the focused app's window, so it never holds Gboard's keys (run
+ * 46009695901: every keyboard dump of the first probe was empty of Gboard nodes).
+ */
+export async function dumpScreen(): Promise<string> {
+  await ensureU2()
   for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      await adb(
-        ['shell', 'uiautomator', 'dump', '/data/local/tmp/probe.xml'],
-        30,
-      )
-      const xml = await adb(['shell', 'cat', '/data/local/tmp/probe.xml'])
-      if (xml.includes('<hierarchy')) {
-        return xml
-      }
-    } catch {
-      // A uiautomator2 server left running holds the accessibility connection; stop it and retry.
-      await adb(['shell', 'pkill -f com.wetest.uia2 || true']).catch(
-        () => undefined,
-      )
+    const xml = String((await u2('dumpWindowHierarchy', [false, 50])) ?? '')
+    if (xml.includes(GBOARD) || (xml.includes('<node') && attempt >= 2)) {
+      return xml
     }
     await sleep(1000)
   }
-  throw new Error('uiautomator dump failed four times')
+  throw new Error('uiautomator2 dump empty four times')
 }
 
 type Node = {attrs: Record<string, string>}
 
-function nodes(xml: string): Node[] {
+export function nodes(xml: string): Node[] {
   const out: Node[] = []
   for (const match of xml.matchAll(/<node\s([^>]*?)\/?>/g)) {
     const attrs: Record<string, string> = {}
@@ -137,7 +182,7 @@ function nodes(xml: string): Node[] {
   return out
 }
 
-function center(bounds: string): [number, number] {
+export function center(bounds: string): [number, number] {
   const [left, top, right, bottom] = bounds.match(/\d+/g)!.map(Number) as [
     number,
     number,
@@ -148,7 +193,7 @@ function center(bounds: string): [number, number] {
 }
 
 /** Gboard's keys by content-desc, and its Shift key's content-desc. */
-function gboard(xml: string): {
+export function gboard(xml: string): {
   keys: Map<string, [number, number]>
   shift: string | null
 } {
@@ -170,7 +215,7 @@ function gboard(xml: string): {
 }
 
 /** The Shift state a dump shows: Gboard labels the key `Shift enabled` and its letter keys in capitals while it is on. */
-function shiftState(xml: string): {
+export function shiftState(xml: string): {
   shiftKey: string | null
   hKey: 'H' | 'h' | null
 } {
@@ -181,11 +226,11 @@ function shiftState(xml: string): {
   }
 }
 
-async function tap([x, y]: [number, number]): Promise<void> {
+export async function tap([x, y]: [number, number]): Promise<void> {
   await adb(['shell', 'input', 'tap', String(x), String(y)])
 }
 
-async function tapKey(label: string): Promise<{xml: string}> {
+export async function tapKey(label: string): Promise<{xml: string}> {
   const xml = await dumpScreen()
   const {keys} = gboard(xml)
   const position = keys.get(label) ?? keys.get(label.toUpperCase())
@@ -200,7 +245,7 @@ async function tapKey(label: string): Promise<{xml: string}> {
 }
 
 /** Evaluate `expression` in the Chrome tab whose URL is `url`, over the forwarded DevTools socket. */
-async function cdp(url: string, expression: string): Promise<unknown> {
+export async function cdp(url: string, expression: string): Promise<unknown> {
   let last: unknown
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -282,7 +327,7 @@ async function cdp(url: string, expression: string): Promise<unknown> {
  * Page-side helpers, installed once the page loaded: the editable and its first block, a description of
  * focus, selection and the text before the caret, and a logger of `beforeinput` and `input`.
  */
-function installScript(editable: string): string {
+export function installScript(editable: string): string {
   return `(() => {
   const describeNode = (node) => node === null ? null : {
     name: node.nodeName,
@@ -356,7 +401,10 @@ function isNull(value: unknown): value is null | undefined {
   return value === null || value === undefined
 }
 
-async function waitForEditable(url: string, editable: string): Promise<void> {
+export async function waitForEditable(
+  url: string,
+  editable: string,
+): Promise<void> {
   for (let check = 0; check < 60; check++) {
     try {
       const ready = await cdp(
@@ -385,7 +433,7 @@ const CHROME_SCREENS = [
   'Skip',
 ]
 
-async function dismissChromeScreens(): Promise<string[]> {
+export async function dismissChromeScreens(): Promise<string[]> {
   const dismissed: string[] = []
   for (let screen = 0; screen < 4; screen++) {
     const hit = nodes(await dumpScreen()).find(
@@ -404,7 +452,7 @@ async function dismissChromeScreens(): Promise<string[]> {
   return dismissed
 }
 
-async function keyboardShown(): Promise<boolean> {
+export async function keyboardShown(): Promise<boolean> {
   for (let check = 0; check < 15; check++) {
     const dump = await adb(['shell', 'dumpsys', 'input_method'])
     if (
@@ -418,24 +466,34 @@ async function keyboardShown(): Promise<boolean> {
   return false
 }
 
-function outDir(): string {
+export function outDir(): string {
   return process.env.THUMBJAR_OUT_DIR ?? 'out'
 }
 
-/** Chrome and Gboard `versionName` and the build, into `out/probe-versions.txt`. */
-export async function recordVersions(): Promise<void> {
-  const lines: string[] = []
-  for (const name of [CHROME, GBOARD]) {
-    const dump = await adb(['shell', 'dumpsys', 'package', name])
-    lines.push(
-      `${name}: ${[...dump.matchAll(/versionName=(\S+)/g)].map((m) => m[1]).join(' ')}`,
-    )
+/** The first `versionName` `dumpsys package` lists for `name`, the installed one. */
+export async function versionName(name: string): Promise<string> {
+  const dump = await adb(['shell', 'dumpsys', 'package', name])
+  const match = /versionName=(\S+)/.exec(dump)
+  if (!match) {
+    throw new Error(`no versionName for ${name}`)
   }
-  lines.push(
+  return match[1]!
+}
+
+/** Chrome and Gboard `versionName` and the build, into `out/<file>`. Returns the two versions. */
+export async function recordVersions(
+  file = 'probe-versions.txt',
+): Promise<{chrome: string; gboard: string}> {
+  const chrome = await versionName(CHROME)
+  const gboard = await versionName(GBOARD)
+  const lines = [
+    `${CHROME}: ${chrome}`,
+    `${GBOARD}: ${gboard}`,
     `build: ${(await adb(['shell', 'getprop', 'ro.build.fingerprint'])).trim()}`,
-  )
+  ]
   mkdirSync(outDir(), {recursive: true})
-  writeFileSync(join(outDir(), 'probe-versions.txt'), `${lines.join('\n')}\n`)
+  writeFileSync(join(outDir(), file), `${lines.join('\n')}\n`)
+  return {chrome, gboard}
 }
 
 /**
@@ -543,12 +601,7 @@ export async function probe(probeCase: ProbeCase, run: number): Promise<void> {
       await adbBuffer(['exec-out', 'screencap', '-p']),
     )
 
-    const keys: string[] = [
-      ...'hello',
-      'Space',
-      ...'world',
-      'Space',
-    ]
+    const keys: string[] = [...'hello', 'Space', ...'world', 'Space']
     for (const [index, key] of keys.entries()) {
       const {xml} = await tapKey(key)
       if (index === 0) {
@@ -576,12 +629,13 @@ export async function probe(probeCase: ProbeCase, run: number): Promise<void> {
     )
     result.textBeforeCaretBeforeKeys = beforeKeys.textBeforeCaret
     result.selectionBeforeKeys = beforeKeys.selection
-    result.focusedBeforeTap = (beforeTap as {editableFocused?: unknown})
-      ?.editableFocused
+    result.focusedBeforeTap = (
+      beforeTap as {editableFocused?: unknown}
+    )?.editableFocused
     result.text = isNull(after.blockText) ? null : after.blockText
-    result.firstBeforeinput = (
-      log as Array<{type: string}>
-    ).find((event) => event.type === 'beforeinput')
+    result.firstBeforeinput = (log as Array<{type: string}>).find(
+      (event) => event.type === 'beforeinput',
+    )
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error)
     await adbBuffer(['exec-out', 'screencap', '-p'])
