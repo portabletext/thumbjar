@@ -1,0 +1,37 @@
+name: Major tag
+
+# Consumers pin the actions as `portabletext/thumbjar/android@v1`. Every
+# release tag moves its major tag to the released commit, so `@v1` always
+# names the latest 1.x release. A manual run moves it to an existing tag.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing release tag, such as v1.1.0"
+        required: true
+
+permissions:
+  contents: write # to push the major tag
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Move the major tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Not a release tag: $TAG"
+            exit 1
+          fi
+          git rev-parse --verify --quiet "refs/tags/$TAG" > /dev/null || { echo "No such tag: $TAG"; exit 1; }
+          MAJOR="${TAG%%.*}"
+          git tag --force "$MAJOR" "refs/tags/$TAG^{commit}"
+          git push --force origin "refs/tags/$MAJOR"
