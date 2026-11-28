@@ -48,6 +48,23 @@ inputs:
 runs:
   using: composite
   steps:
+    # The emulator runner puts api-level into sh -c and emulator-build into a curl command line, so both must be
+    # plain numbers before it sees them.
+    - name: Check the inputs
+      shell: bash
+      env:
+        THUMBJAR_API_LEVEL: ${{ inputs.api-level }}
+        THUMBJAR_EMULATOR_BUILD: ${{ inputs.emulator-build }}
+      run: |
+        if ! [[ "$THUMBJAR_API_LEVEL" =~ ^[0-9]+$ ]]; then
+          echo "::error::api-level must be a number"
+          exit 1
+        fi
+        if [[ -n "$THUMBJAR_EMULATOR_BUILD" && ! "$THUMBJAR_EMULATOR_BUILD" =~ ^[0-9]+$ ]]; then
+          echo "::error::emulator-build must be a number or empty"
+          exit 1
+        fi
+
     - name: Enable KVM group perms
       shell: bash
       run: |
@@ -63,10 +80,12 @@ runs:
     - name: Look up the SDK cache key
       id: sdk-key
       continue-on-error: true
+      env:
+        THUMBJAR_API_LEVEL: ${{ inputs.api-level }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list 2> /dev/null | npx --no thumbjar ci android sdk-cache-key --api "${{ inputs.api-level }}" >> "$GITHUB_OUTPUT"
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list 2> /dev/null | npx --no thumbjar ci android sdk-cache-key --api "$THUMBJAR_API_LEVEL" >> "$GITHUB_OUTPUT"
 
     - name: Restore the SDK cache
       id: sdk-restore
@@ -82,13 +101,22 @@ runs:
     # `sdkmanager` from taking a partial image for installed.
     - name: Clear a missed SDK restore
       if: steps.sdk-key.outputs.key != '' && steps.sdk-restore.outputs.cache-hit != 'true'
+      env:
+        SDK_PATH: ${{ steps.sdk-key.outputs.path }}
       shell: bash
-      run: rm -rf "${{ steps.sdk-key.outputs.path }}"
+      run: rm -rf "$SDK_PATH"
 
     - name: Run on emulator
       id: run1
       continue-on-error: true
-      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        THUMBJAR_TEST: ${{ inputs.test }}
+        THUMBJAR_KEYBOARD: ${{ inputs.keyboard }}
+        THUMBJAR_PAGE_DIR: ${{ inputs.page-dir }}
+        THUMBJAR_CONFIG: ${{ inputs.config }}
+        THUMBJAR_PROJECT: ${{ inputs.project }}
+        THUMBJAR_OUT_DIR: ${{ inputs.out-dir }}
+      uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       with:
         api-level: ${{ inputs.api-level }}
         target: google_apis_playstore
@@ -102,7 +130,7 @@ runs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         emulator-boot-timeout: 360
         working-directory: ${{ inputs.working-directory }}
-        script: npx --no thumbjar ci android run "${{ inputs.test }}" --keyboard "${{ inputs.keyboard }}" --page-dir "${{ inputs.page-dir }}" --config "${{ inputs.config }}" --project "${{ inputs.project }}" --out-dir "${{ inputs.out-dir }}"
+        script: npx --no thumbjar ci android run "$THUMBJAR_TEST" --keyboard "$THUMBJAR_KEYBOARD" --page-dir "$THUMBJAR_PAGE_DIR" --config "$THUMBJAR_CONFIG" --project "$THUMBJAR_PROJECT" --out-dir "$THUMBJAR_OUT_DIR"
 
     # The emulator sometimes never comes online, adb loses it after boot, or Gboard's Japanese dictionary never loads
     # on that boot. Exits 0 to retry once on a fresh emulator then, never after a test failure on a reachable device.
@@ -110,15 +138,24 @@ runs:
       id: retry
       if: steps.run1.outcome == 'failure'
       continue-on-error: true
+      env:
+        THUMBJAR_OUT_DIR: ${{ inputs.out-dir }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: npx --no thumbjar ci android retry --out-dir "${{ inputs.out-dir }}"
+      run: npx --no thumbjar ci android retry --out-dir "$THUMBJAR_OUT_DIR"
 
     - name: Run on emulator (retry)
       id: run2
       if: steps.retry.outcome == 'success'
       continue-on-error: true
-      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        THUMBJAR_TEST: ${{ inputs.test }}
+        THUMBJAR_KEYBOARD: ${{ inputs.keyboard }}
+        THUMBJAR_PAGE_DIR: ${{ inputs.page-dir }}
+        THUMBJAR_CONFIG: ${{ inputs.config }}
+        THUMBJAR_PROJECT: ${{ inputs.project }}
+        THUMBJAR_OUT_DIR: ${{ inputs.out-dir }}
+      uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       with:
         api-level: ${{ inputs.api-level }}
         target: google_apis_playstore
@@ -132,16 +169,18 @@ runs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         emulator-boot-timeout: 360
         working-directory: ${{ inputs.working-directory }}
-        script: npx --no thumbjar ci android run "${{ inputs.test }}" --keyboard "${{ inputs.keyboard }}" --page-dir "${{ inputs.page-dir }}" --config "${{ inputs.config }}" --project "${{ inputs.project }}" --out-dir "${{ inputs.out-dir }}"
+        script: npx --no thumbjar ci android run "$THUMBJAR_TEST" --keyboard "$THUMBJAR_KEYBOARD" --page-dir "$THUMBJAR_PAGE_DIR" --config "$THUMBJAR_CONFIG" --project "$THUMBJAR_PROJECT" --out-dir "$THUMBJAR_OUT_DIR"
 
     # The runner downloads `emulator-build` and unpacks it over the latest emulator in `$ANDROID_HOME/emulator`, which
     # it launches. A failed download or unpack would leave the latest, which may be the build that crashes.
     - name: Check the pinned emulator
       id: emulator-check
       if: always() && inputs.emulator-build != '' && steps.run1.outcome != 'skipped'
+      env:
+        THUMBJAR_EMULATOR_BUILD: ${{ inputs.emulator-build }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: npx --no thumbjar ci android check-emulator --build "${{ inputs.emulator-build }}"
+      run: npx --no thumbjar ci android check-emulator --build "$THUMBJAR_EMULATOR_BUILD"
 
     # Only the default branch saves, so pull requests read its entry and add none. A scheduled run always runs on the
     # default branch but its event carries no `repository`, so it is matched by its event name. Only an image that
