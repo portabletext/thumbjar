@@ -54,4 +54,4 @@ thumbjar's setup file, `thumbjar/vitest/setup`, runs after each test file. It fa
 
 The last rule exists because `test.fails` counts any error as the expected failure. An infrastructure error would otherwise pass as a page bug.
 
-For a failed test, the setup file prints the keys the driver tapped and the events each step recorded. With `summaryFile` it also appends the file's summary.
+For a failed test, the setup file prints the keys the driver tapped and the events each step recorded. It writes the run's [verdict.json](running.md#verdictjson). With `summaryFile` it also appends the file's summary.

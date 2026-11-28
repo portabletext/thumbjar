@@ -4,7 +4,7 @@
 import {stripVTControlCharacters} from 'node:util'
 import type {DriverRun} from '../driver.ts'
 
-const OUTCOMES = [
+export const OUTCOMES = [
   'passed',
   'failed',
   'expected failure',

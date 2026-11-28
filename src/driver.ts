@@ -6,6 +6,7 @@
 // recorded in the tapped key's own `beforeinput` event.
 
 import {mkdirSync} from 'node:fs'
+import {relative} from 'node:path'
 import {inject, type TestContext} from 'vitest'
 import {
   assertNoUnstoppedProcess,
@@ -28,10 +29,12 @@ import {
 import {PageExceptionError} from './device/cdp.ts'
 import {Device} from './device/u2.ts'
 import {
+  collectArtifacts,
   currentInspection,
   currentSignal,
   describeError,
   GUARDED_INSPECTION,
+  guardedErrorMessage,
   isInstance,
   phase,
   resetPhaseClock,
@@ -141,13 +144,92 @@ export type DriverRun = {
  */
 export const driverRuns: DriverRun[] = []
 
-// The test each run belongs to, kept apart from the record so a run's shape stays the same. Two tests can
-// share a name, in two `describe` blocks for instance.
-const runTasks = new WeakMap<DriverRun, object>()
+// The test each run belongs to, the artifacts the call wrote, relative to the out directory, the step
+// records of the attempt whose step failure the call threw, and the message of the fault the call threw,
+// kept apart from the record so a run's shape stays the same. Two tests can share a name, in two
+// `describe` blocks for instance.
+type RunDetails = {
+  task: object
+  artifacts: Set<string>
+  records?: StepRecord[]
+  fault?: string
+}
+const runTasks = new WeakMap<DriverRun, RunDetails>()
 
 /** The last `driverRuns` record of `task`, the Vitest test that made the call, which ended it. */
 export function lastDriverRun(task: object): DriverRun | undefined {
-  return driverRuns.findLast((run) => runTasks.get(run) === task)
+  return driverRuns.findLast((run) => runTasks.get(run)?.task === task)
+}
+
+/** The artifacts every call of `task` wrote, relative to the out directory, sorted. */
+export function testArtifacts(task: object): string[] {
+  return [
+    ...new Set(
+      driverRuns.flatMap((run) => {
+        const details = runTasks.get(run)
+        return details?.task === task ? [...details.artifacts] : []
+      }),
+    ),
+  ].sort()
+}
+
+/** The step records of the last attempt of `run`, when a step of that attempt failed and the call threw that failure. */
+export function failedStepRecords(run: DriverRun): StepRecord[] | undefined {
+  return runTasks.get(run)?.records
+}
+
+/**
+ * The message of the error `run`'s call threw, the fault it ended on, or the abort reason of a call its
+ * test's timeout ended, from the moment the test's signal aborted, before the call's cleanup settles.
+ * Absent for a call that returned before its test aborted. The test may catch it and fail on another
+ * error.
+ */
+export function thrownFault(run: DriverRun): string | undefined {
+  return runTasks.get(run)?.fault
+}
+
+/** Record the message of `error`, which the call `details` describes threw. */
+function recordFault(details: RunDetails, error: unknown): void {
+  details.fault = guardedErrorMessage(thrownValue(error))
+}
+
+/**
+ * Record the reason `signal` aborts with as the fault of the call `details` describes, while `call` is
+ * pending, also while it waits behind another call. A timeout can end the test's file before the call's
+ * cleanup settles and `recordFault` replaces it with the message of the error the call threw.
+ */
+function recordAbort(
+  details: RunDetails,
+  signal: AbortSignal,
+  call: Promise<unknown>,
+): void {
+  const onAbort = () => {
+    details.fault ??= guardedErrorMessage(signal.reason)
+  }
+  if (signal.aborted) {
+    onAbort()
+    return
+  }
+  signal.addEventListener('abort', onAbort, {once: true})
+  const stop = () => signal.removeEventListener('abort', onAbort)
+  call.then(stop, stop)
+}
+
+/** Record `run` against `task`, with a sink for the artifacts the call writes. */
+function track(run: DriverRun, task: object): RunDetails {
+  const details: RunDetails = {task, artifacts: new Set()}
+  driverRuns.push(run)
+  runTasks.set(run, details)
+  return details
+}
+
+/** Run `work` so each artifact written in it is listed for the call `details` describes. */
+function collectInto<T>(details: RunDetails, work: () => T): T {
+  const directory = outDir()
+  return collectArtifacts(
+    (path) => details.artifacts.add(relative(directory, path)),
+    work,
+  )
 }
 
 // The last call, which can still be stopping after its test timed out.
@@ -225,14 +307,18 @@ export async function runOnDevice(
       fails: Boolean(context.task.fails),
       state: 'driving',
     }
-    driverRuns.push(run)
-    runTasks.set(run, context.task)
+    const details = track(run, context.task)
     const pending = previousRun.then(async () => {
       try {
         context.signal.throwIfAborted()
-        const result = await runOnSimulator(context, options, (taps) => {
-          run.taps = taps
-        })
+        const result = await collectInto(details, () =>
+          runOnSimulator(context, options, (taps, records) => {
+            run.taps = taps
+            if (records.some((record) => record.status !== 'done')) {
+              details.records = records
+            }
+          }),
+        )
         run.state = 'complete'
         return result
       } catch (error) {
@@ -242,9 +328,11 @@ export async function runOnDevice(
             ? 'inconclusive'
             : 'faulted'
         run.reason = GUARDED_INSPECTION.describe(error)
+        recordFault(details, error)
         throw error
       }
     })
+    recordAbort(details, context.signal, pending)
     previousRun = pending.then(
       () => {},
       () => {},
@@ -258,9 +346,13 @@ export async function runOnDevice(
       fails: Boolean(context.task.fails),
       state: 'aborted',
     }
-    driverRuns.push(run)
-    runTasks.set(run, context.task)
-    context.signal.throwIfAborted()
+    const details = track(run, context.task)
+    try {
+      context.signal.throwIfAborted()
+    } catch (error) {
+      recordFault(details, error)
+      throw error
+    }
   }
   const note = unsupportedNote(options.steps, options.keyboard)
   if (note !== undefined) {
@@ -273,6 +365,7 @@ export async function runOnDevice(
     thrown?: {error: unknown}
     failure?: {error: unknown; records: StepRecord[]}
   }[] = []
+  let call: DriverRun | undefined
   try {
     // A value a step throws and the signal's reason end up in its records and its error, never a
     // conversion error.
@@ -285,6 +378,7 @@ export async function runOnDevice(
         task: context.task,
       },
       (run) => (name, connect, hooks) => {
+        call = run
         const attempt: (typeof attempts)[number] = {}
         attempts.push(attempt)
         delete run.taps
@@ -317,6 +411,10 @@ export async function runOnDevice(
     if (failure === undefined || !Object.is(failure.error, error)) {
       throw thrownValue(error)
     }
+    const details = call === undefined ? undefined : runTasks.get(call)
+    if (details !== undefined) {
+      details.records = failure.records
+    }
     throw withStepRecords(thrownValue(error), failure.records)
   }
 }
@@ -337,26 +435,33 @@ async function drive<T>(
     fails: test.fails,
     state: 'driving',
   }
-  driverRuns.push(run)
-  runTasks.set(run, test.task)
   const name = `${keyboard}-${slug(test.name)}`
+  const details = track(run, test.task)
   mkdirSync(outDir(), {recursive: true})
   // Chained before the first await, so a call made while another is waiting still waits for it. The
   // callback runs in the context that queued the call, a step's getter of a `runOnDevice` call for
   // instance, so it sets the call's own inspection and leaves any strict scope before it starts.
-  const running = previousRun.then(() =>
-    runNotStrict(() =>
-      runInspecting(GUARDED_INSPECTION, () =>
-        driveAfterPrevious(
-          GUARDED_INSPECTION,
-          run,
-          name,
-          test.signal,
-          attempt(run),
+  const running = previousRun
+    .then(() =>
+      collectInto(details, () =>
+        runNotStrict(() =>
+          runInspecting(GUARDED_INSPECTION, () =>
+            driveAfterPrevious(
+              GUARDED_INSPECTION,
+              run,
+              name,
+              test.signal,
+              attempt(run),
+            ),
+          ),
         ),
       ),
-    ),
-  )
+    )
+    .catch((error: unknown) => {
+      recordFault(details, error)
+      throw error
+    })
+  recordAbort(details, test.signal, running)
   previousRun = running.then(
     () => {},
     () => {},

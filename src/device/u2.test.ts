@@ -1,7 +1,16 @@
+import {mkdtempSync} from 'node:fs'
+import {readFile} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import {describe, expect, test, vi} from 'vitest'
 import {AdbError, DeviceLost, runStrict} from './adb.ts'
 import {Device, HTTPError} from './u2.ts'
-import {GUARDED_INSPECTION, runAbortable, runInspecting} from './util.ts'
+import {
+  collectArtifacts,
+  GUARDED_INSPECTION,
+  runAbortable,
+  runInspecting,
+} from './util.ts'
 
 const device = vi.hoisted(() => {
   let releaseShell!: () => void
@@ -66,9 +75,11 @@ vi.mock(import('./adb.ts'), async (importOriginal) => ({
         readUntil: () =>
           Promise.resolve(
             Buffer.from(
-              ++device.pings === 1
-                ? 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nno'
-                : 'HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\npong',
+              service === 'exec:screencap -p'
+                ? 'png'
+                : ++device.pings === 1
+                  ? 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nno'
+                  : 'HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\npong',
             ),
           ),
       })
@@ -143,5 +154,56 @@ describe(Device.connect.name, () => {
       answer,
       services: ['tcp:9008'],
     })
+  })
+})
+
+describe('Device.prototype.screenshot', () => {
+  // A device whose server answers `takeScreenshot` with `answer`, without starting one.
+  function answering(answer: unknown): Device {
+    const connected = Object.create(Device.prototype) as Device
+    connected.rpc = () => Promise.resolve(answer)
+    return connected
+  }
+
+  async function screenshot(connected: Device) {
+    const base = join(mkdtempSync(join(tmpdir(), 'thumbjar-u2-')), 'en-foo')
+    const recorded: string[] = []
+    const error = await collectArtifacts(
+      (path) => recorded.push(path),
+      () => connected.screenshot(base),
+    ).catch((error: unknown) => error)
+    return {base, recorded, error}
+  }
+
+  test("records the server's JPEG for the current call", async () => {
+    const {base, recorded, error} = await screenshot(
+      answering(Buffer.from('jpg').toString('base64')),
+    )
+
+    expect({
+      error,
+      recorded,
+      // `readFileSync` is mocked for the jar check.
+      data: await readFile(`${base}.jpg`, 'utf8'),
+    }).toEqual({error: undefined, recorded: [`${base}.jpg`], data: 'jpg'})
+  })
+
+  test('records the screencap PNG for the current call when the server has no screenshot', async () => {
+    const {base, recorded, error} = await screenshot(answering(''))
+
+    expect({
+      error,
+      recorded,
+      data: await readFile(`${base}.png`, 'utf8'),
+    }).toEqual({error: undefined, recorded: [`${base}.png`], data: 'png'})
+  })
+
+  test('records nothing when the screencap fallback fails', async () => {
+    const refusal = new AdbError('screencap refused')
+    device.serviceError = refusal
+    const {recorded, error} = await screenshot(answering(''))
+    device.serviceError = undefined
+
+    expect({error, recorded}).toEqual({error: refusal, recorded: []})
   })
 })

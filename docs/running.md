@@ -94,6 +94,8 @@ It exits with `0` when the emulator never booted, adb lost the device after boot
 - `<name>-keyboard.xml` and a screenshot capture the keyboard after loading.
 - `<name>-fail.xml` and a screenshot capture the screen after a failed attempt.
 
+- `verdict.json` is the run's verdict, one file for every test file. See [below](#verdictjson).
+
 `thumbjar run` also writes these to `--out-dir`.
 
 - `timing.txt` and `phases.log` time each stage.
@@ -104,3 +106,60 @@ It exits with `0` when the emulator never booted, adb lost the device after boot
 - `diagnose.txt` is written by preparation. Japanese preparation adds `ja-setup.log` and `ja-dictionary.log`. English preparation adds `en-warmup.log` and `en-warmup.jsonl`.
 
 After failed preparation or failed tests, `run` checks the device and records the result in `timing.txt`.
+
+### verdict.json
+
+Start here after downloading the artifact. thumbjar's setup file writes `verdict.json` to `outDir` after each test file and merges every test file of the run into it. Each entry names the Vitest project and the platform, so two device projects that share an `outDir` keep their entries apart. A test file that runs again in the same project replaces its entries. Entries of test files that no longer exist under the project's root are dropped. Each project prunes only its own entries. Global setup removes the verdict an earlier run left. `counts` counts the entries of `tests` by outcome. Vitest processes launched separately don't coordinate their writes to the same `outDir`, so give each one its own `outDir`.
+
+Each test has the outcome the job summary counts it by and, for a test that did not pass, the `reason`. For `inconclusive`, `device offline` and `driver fault` it is the driver's own reason, or else the message of the error the test's last driver call threw. For a test that timed out before that call settled, that message is the test's timeout. It is never the test's own error, which can be an unrelated assertion after the test caught the call's error. For `failed` it is the page's exception or else the assertion's message. The entry also holds the first step of the last attempt that did not end `done`, the keys and events counted per step, and the files every driver call of the test wrote in this run.
+
+`artifacts` is read once the test file's tests have ended. A test cut off by its timeout lists only the files written before then. Files the driver's cleanup writes after that are missing, such as the iOS page source, screenshot and step JSON, though they are still in `outDir`. A test that did not run has no `outcome`. The `Verdict` type from `thumbjar` describes the shape.
+
+```json
+{
+  "version": 1,
+  "thumbjar": "1.2.0",
+  "counts": {
+    "passed": 1,
+    "failed": 0,
+    "expected failure": 0,
+    "inconclusive": 1,
+    "device offline": 0,
+    "driver fault": 0
+  },
+  "tests": [
+    {
+      "project": "device",
+      "platform": "android",
+      "file": "tests/enter.test.ts",
+      "name": "Scenario: Typing foo",
+      "outcome": "passed",
+      "taps": [{"keys": 3, "events": 3}],
+      "artifacts": ["en-typing-foo-keyboard.xml", "en-typing-foo.json"]
+    },
+    {
+      "project": "device",
+      "platform": "android",
+      "file": "tests/enter.test.ts",
+      "name": "Scenario: Enter after foo",
+      "outcome": "inconclusive",
+      "reason": "the driver faulted after it sent input, so it was not retried",
+      "firstDivergingStep": {
+        "index": 0,
+        "type": "enter",
+        "status": "failed",
+        "reason": "Error: tap failed",
+        "keys": ["Enter"],
+        "events": [],
+        "textAfter": "foo"
+      },
+      "taps": [{"keys": 1, "events": 0}],
+      "artifacts": [
+        "en-enter-after-foo-fail.xml",
+        "en-enter-after-foo-keyboard.xml",
+        "en-enter-after-foo.json"
+      ]
+    }
+  ]
+}
+```

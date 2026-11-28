@@ -2,6 +2,7 @@
 // notation, so they read the same as the logs of the recorded CI runs the fixtures come from.
 
 import {AsyncLocalStorage} from 'node:async_hooks'
+import {writeFileSync} from 'node:fs'
 import {JOIN_GRACE_SECONDS} from './budget.ts'
 
 let phaseClockStart = Date.now()
@@ -15,6 +16,28 @@ export function runAbortable<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   return attemptSignal.run(signal, run)
+}
+
+// Where the `runOnDevice` call the current work belongs to records each artifact it wrote.
+const artifactSink = new AsyncLocalStorage<(path: string) => void>()
+
+/** Run `run` so every artifact written in it, through `writeArtifact` or `recordArtifact`, is passed to `record`. */
+export function collectArtifacts<T>(
+  record: (path: string) => void,
+  run: () => T,
+): T {
+  return artifactSink.run(record, run)
+}
+
+/** Write an artifact and record it for the call the current work belongs to. */
+export function writeArtifact(path: string, data: string | Uint8Array): void {
+  writeFileSync(path, data)
+  recordArtifact(path)
+}
+
+/** Record an artifact that was already written, for the call the current work belongs to. */
+export function recordArtifact(path: string): void {
+  artifactSink.getStore()?.(path)
 }
 
 /** The signal of the attempt the current call belongs to, if any. */
