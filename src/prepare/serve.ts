@@ -55,9 +55,9 @@ const server = http.createServer((request, response) => {
   )
 })
 
-server.listen(port, () =>
+server.listen(port, '127.0.0.1', () =>
   process.stdout.write(
-    `Serving HTTP on 0.0.0.0 port ${port} (http://0.0.0.0:${port}/) ...\n`,
+    `Serving HTTP on 127.0.0.1 port ${port} (http://localhost:${port}/) ...\n`,
   ),
 )
 
