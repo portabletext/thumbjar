@@ -25,18 +25,18 @@ jobs:
     name: Android (${{ matrix.lang }})
     runs-on: ubuntu-latest
     # The `ja` row's action cap plus room for the steps before it.
-    timeout-minutes: 155
+    timeout-minutes: 164
 
     strategy:
       fail-fast: false
       matrix:
         # A run's cap covers `runStepWorstSeconds` from `thumbjar/vitest` for the row's file: 62 minutes for
         # `ja` with 3 tests (59 worst) and 50 for `en` with 2 (46 worst). Composite steps take no cap of their own,
-        # so `actionMinutes` covers two runs, as with a retry, plus 4 for the jar, 5 for the upload and 1 for the
-        # rest.
+        # so `actionMinutes` covers two runs, as with a retry, plus 4 for the jar, 9 for the emulator install, 5 for
+        # the upload and 1 for the rest.
         include:
-          - {lang: ja, actionMinutes: 134}
-          - {lang: en, actionMinutes: 110}
+          - {lang: ja, actionMinutes: 143}
+          - {lang: en, actionMinutes: 119}
 
     steps:
       - uses: actions/checkout@v7
@@ -56,8 +56,8 @@ jobs:
           pnpm build
           pnpm build:e2e
 
-      # KVM, the uiautomator2 jar, the emulator run with one retry when the first emulator fails as infrastructure,
-      # and the `e2e/out/` upload.
+      # KVM, the uiautomator2 jar, the pinned emulator's verified install, the emulator run with one retry when the first
+      # emulator fails as infrastructure, and the `e2e/out/` upload.
       - name: Run on emulator
         timeout-minutes: ${{ matrix.actionMinutes }}
         uses: ./android
