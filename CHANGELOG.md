@@ -1,5 +1,13 @@
 # thumbjar
 
+## 1.1.1
+
+### Patch Changes
+
+- [#15](https://github.com/portabletext/thumbjar/pull/15) [`5c83096`](https://github.com/portabletext/thumbjar/commit/5c830967f7591230d4f2bc91aaad2a55ca7ed0db) Thanks [@christianhg](https://github.com/christianhg)! - fix: pass the Android action's inputs to its scripts through env
+
+- [#15](https://github.com/portabletext/thumbjar/pull/15) [`aea81ce`](https://github.com/portabletext/thumbjar/commit/aea81ced27f0bab390807339a82c3924be1e7468) Thanks [@christianhg](https://github.com/christianhg)! - fix: serve test pages on loopback only
+
 ## 1.1.0
 
 ### Minor Changes
