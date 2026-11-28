@@ -16,8 +16,15 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src/**/*.ts", "vitest.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "android/**/*.ts",
+    "android/**/*.mjs",
+    "vitest.config.ts"
+  ],
   "exclude": ["src/page.ts"]
 }

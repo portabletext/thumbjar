@@ -12,13 +12,13 @@ Reference the action as `@v1`. The `v1` tag moves to every 1.x release, so it al
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 155
+    timeout-minutes: 164
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {lang: ja, actionMinutes: 134}
-          - {lang: en, actionMinutes: 110}
+          - {lang: ja, actionMinutes: 143}
+          - {lang: en, actionMinutes: 119}
     steps:
       - uses: actions/checkout@v7
 
@@ -37,7 +37,7 @@ jobs:
           keyboard: ${{ matrix.lang }}
 ```
 
-Run the action after checkout, Node setup, the install that brings in `thumbjar` and the build that writes `editor.html` into the page directory. Swap `npm ci` and `npm run build` for your package manager and page build. It enables KVM, runs `thumbjar fetch-u2-jar`, then runs `thumbjar ci android run` inside [`reactivecircus/android-emulator-runner`](https://github.com/ReactiveCircus/android-emulator-runner) with the same emulator settings as [the manual job](#the-manual-job).
+Run the action after checkout, Node setup, the install that brings in `thumbjar` and the build that writes `editor.html` into the page directory. Swap `npm ci` and `npm run build` for your package manager and page build. It enables KVM, runs `thumbjar fetch-u2-jar`, installs the pinned emulator, then runs `thumbjar ci android run` inside [`reactivecircus/android-emulator-runner`](https://github.com/ReactiveCircus/android-emulator-runner) with the same emulator settings as [the manual job](#the-manual-job).
 
 ### Inputs
 
@@ -52,7 +52,17 @@ Run the action after checkout, Node setup, the install that brings in `thumbjar`
 | `out-dir`           | `out`                                       | Where the CLI writes its logs, relative to `working-directory`. It is uploaded as an artifact.  |
 | `artifact-name`     | `thumbjar-android-<keyboard>-<run attempt>` | The artifact's name. Give each job its own.                                                     |
 | `api-level`         | `36`                                        | The emulator's Android API level.                                                               |
-| `emulator-build`    | `16428233`                                  | The emulator build to install.                                                                  |
+| `emulator-build`    | `16428233`                                  | The emulator build to install. Verified when it is the pinned build, see below.                 |
+
+### The pinned emulator
+
+The action pins emulator 37.2.12, build `16428233`, since emulator 37.2.13 crashes during guest process cleanup. `android/emulator-pin.json` pins that build's archive URL, size and SHA-256, and the action's own `install-emulator.mjs` handles it, so it works with an installed thumbjar 1.1.0 or later.
+
+- **`16428233`, the default.** Before the emulator runner starts, the action streams the archive to a private file, unpacks it only once its size and SHA-256 match the pin, and swaps it in for `$ANDROID_HOME/emulator`, keeping the old emulator until the new one is in place. A mismatch fails the action and leaves the SDK as it was. The runner gets no `emulator-build`. This verifies the archive before it is installed, not what the runner launches: the runner's own `sdkmanager --install emulator` still runs before launch, and on hosted runners it installs into `emulator-2` (run 46129686772), after which the runner launches whatever is in `emulator/`. The runner has no hook that can stop the launch, so the emulator's build is checked with `thumbjar ci android check-emulator` after boot and before any test, failing the run when it is not the pinned build, and again after the runs. The check reads `Pkg.BuildId`, not the bytes.
+- **Another build.** The action passes it to the runner as before, which downloads and unpacks it with no digest check, and logs a warning that the build is not verified. `check-emulator` checks the build after the runs.
+- **Empty.** The runner launches the SDK's emulator, unchecked, and the action logs the same warning.
+
+The input is trimmed, as the runner trims its inputs, and must then be digits or empty. The install assumes one writer per SDK. If the job is killed during the swap, `$ANDROID_HOME/emulator` can be missing, with the old emulator left at `$ANDROID_HOME/.thumbjar-emulator-*/previous`: move it back to `$ANDROID_HOME/emulator`, or delete that `.thumbjar-emulator-*` directory and rerun the job to install the pin afresh. The SDK cache holds only the system image, never the emulator.
 
 thumbjar reads the test file relative to the page directory's parent to work out its time budget, so `page-dir` must sit directly in `working-directory`, next to the tests. A nested one such as `build/web` fails before the emulator starts.
 
@@ -70,7 +80,7 @@ A test failure on a reachable device is never retried, and a retry is never retr
 
 ### The step cap
 
-Composite actions take no `timeout-minutes` of their own, so set it on the step that uses the action. It must cover two runs, the first and the retry, plus the jar fetch and the upload. thumbjar's own workflow budgets 62 minutes per run for `ja` with 3 tests and 50 for `en` with 2, so the step gets 134 and 110 minutes: two runs plus 4 for the jar, 5 for the upload and 1 for the rest. See [time budgets](#time-budgets) for what one run must cover.
+Composite actions take no `timeout-minutes` of their own, so set it on the step that uses the action. It must cover two runs, the first and the retry, plus the jar fetch, the emulator install and the upload. thumbjar's own workflow budgets 62 minutes per run for `ja` with 3 tests and 50 for `en` with 2, so the step gets 143 and 119 minutes: two runs plus 4 for the jar, 9 for the emulator install, 5 for the upload and 1 for the rest. See [time budgets](#time-budgets) for what one run must cover.
 
 ## The manual job
 
@@ -146,6 +156,7 @@ Every stage of thumbjar has a time bound. Set your step timeouts at or above the
 - One `runOnDevice` call takes at most 636 seconds. The device project's test timeout is 661 seconds. Time spent waiting for earlier calls counts against it.
 - `thumbjar prepare` takes at most 889 seconds for `ja` and 822 for `en`.
 - `thumbjar fetch-u2-jar` takes at most 165 seconds.
+- The pinned emulator's install has 510 seconds of timed stages: three downloads of 120 seconds, 15 apart, and an unpack of 120. Checking the unpacked build and the swap have no bound of their own, and only take seconds.
 - The emulator runner waits up to 360 seconds for boot with `emulator-boot-timeout: 360`.
 
 These bounds assume adb processes exit after SIGKILL. When one does not, no later typing starts.

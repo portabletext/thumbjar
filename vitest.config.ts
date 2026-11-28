@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     name: 'unit',
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'android/**/*.test.ts'],
     env: {
       THUMBJAR_OUT_DIR:
         process.env.THUMBJAR_OUT_DIR ??
