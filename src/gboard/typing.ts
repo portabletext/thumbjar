@@ -1,7 +1,6 @@
 // One attempt on the device: open the page in Chrome, raise Gboard, drive each step on its keys, and read
 // the page's text, selection and events back over CDP.
 
-import {writeFileSync} from 'node:fs'
 import {
   adb,
   adbExit,
@@ -42,6 +41,7 @@ import {
   sleep,
   throwIfAborted,
   UNPRINTABLE_ERROR,
+  writeArtifact,
 } from '../device/util.ts'
 import type {
   Commit,
@@ -118,7 +118,7 @@ export async function runInChrome(
     // Serializing runs the steps' getters and `toJSON`, so a failure to write the artifact never replaces
     // the step's error or decides whether it is retried.
     try {
-      writeFileSync(`${outDir()}/${name}.json`, JSON.stringify(result, null, 2))
+      writeArtifact(`${outDir()}/${name}.json`, JSON.stringify(result, null, 2))
     } catch (artifactError) {
       phase(`failure artifact not written: ${describeError(artifactError)}`)
     }
@@ -169,7 +169,7 @@ export async function runInChrome(
     throw error
   }
   result.run = run
-  writeFileSync(`${outDir()}/${name}.json`, JSON.stringify(result, null, 2))
+  writeArtifact(`${outDir()}/${name}.json`, JSON.stringify(result, null, 2))
   phase(
     `ran ${pyRepr(run.text)} steps=${records.map((record) => `${record.type}:${record.status}`).join('/')}`,
   )
@@ -347,14 +347,14 @@ export async function openKeyboard(
     `gboard in a11y tree: ${pyRepr(await device.find({packageName: GBOARD}).exists())}, chrome in a11y tree: ${pyRepr(await device.find({packageName: CHROME}).exists())}`,
   )
   if (!shown) {
-    writeFileSync(`${outDir()}/${name}-ims.txt`, inputMethodDump)
+    writeArtifact(`${outDir()}/${name}-ims.txt`, inputMethodDump)
     throw new Error('Gboard window did not appear')
   }
   phase('keyboard visible')
   // The input method window shows before Gboard has drawn its keys.
   await gboardKeys(device)
 
-  writeFileSync(
+  writeArtifact(
     `${outDir()}/${name}-keyboard.xml`,
     await device.dumpHierarchy(),
   )
@@ -637,7 +637,7 @@ export async function dumpFailure(
     return
   }
   try {
-    writeFileSync(`${outDir()}/${name}-fail.xml`, await device.dumpHierarchy())
+    writeArtifact(`${outDir()}/${name}-fail.xml`, await device.dumpHierarchy())
     await device.screenshot(`${outDir()}/${name}-fail`)
   } catch (error) {
     throwIfAborted()
@@ -1127,7 +1127,7 @@ export async function ensureJapanese(
       phase(`japanese layout active after ${attempt} switches`)
       return
     }
-    writeFileSync(
+    writeArtifact(
       `${outDir()}/${name}-lang-${attempt}.xml`,
       await device.dumpHierarchy(),
     )

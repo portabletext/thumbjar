@@ -14,3 +14,4 @@ export type {
   StepRecord,
   StepStatus,
 } from './driver.ts'
+export type {Verdict} from './vitest/verdict.ts'

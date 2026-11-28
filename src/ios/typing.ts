@@ -1,9 +1,9 @@
-import {mkdirSync, writeFileSync} from 'node:fs'
+import {mkdirSync} from 'node:fs'
 import {join} from 'node:path'
 import type {TestContext} from 'vitest'
 import {remote} from 'webdriverio'
 import {prefixedPageUrl} from '../device/page-url.ts'
-import {pyRepr, sleep} from '../device/util.ts'
+import {pyRepr, recordArtifact, sleep, writeArtifact} from '../device/util.ts'
 import {slug} from '../driver.ts'
 import {
   FIELD_BOUNDARY,
@@ -23,7 +23,7 @@ type PageState = {text: string | null; events: PageEvent[]; state?: unknown}
 export async function runOnSimulator(
   context: TestContext,
   options: RunOnDeviceOptions,
-  onTaps?: (taps: StepTaps[]) => void,
+  onTaps?: (taps: StepTaps[], records: StepRecord[]) => void,
 ): Promise<Run> {
   context.signal.throwIfAborted()
   const records: StepRecord[] = []
@@ -265,12 +265,14 @@ export async function runOnSimulator(
       records
         .filter((record) => record.status !== 'skipped')
         .map((record) => ({keys: record.keys, events: record.events})),
+      records,
     )
     if (browser) {
       try {
         await browser.switchContext('NATIVE_APP')
-        writeFileSync(`${artifact}.xml`, await browser.getPageSource())
+        writeArtifact(`${artifact}.xml`, await browser.getPageSource())
         await browser.saveScreenshot(`${artifact}.png`)
+        recordArtifact(`${artifact}.png`)
       } catch (error) {
         result.captureError = String(error)
       }
@@ -280,7 +282,7 @@ export async function runOnSimulator(
     } catch (error) {
       result.cleanupError = String(error)
     }
-    writeFileSync(`${artifact}.json`, JSON.stringify(result, null, 2))
+    writeArtifact(`${artifact}.json`, JSON.stringify(result, null, 2))
   }
 }
 

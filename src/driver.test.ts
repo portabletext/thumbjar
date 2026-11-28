@@ -3,11 +3,27 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {describe, expect, test, vi} from 'vitest'
+import packageJson from '../package.json' with {type: 'json'}
 import {runOnDevice} from './driver.ts'
 import {FIELD_BOUNDARY} from './gboard/typing.ts'
 import {runSuite} from './testing.ts'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
+const EVERY_OUTCOME = 'src/fixtures/suites/every-outcome.ts'
+
+/** Vitest's error for a test that ran past its timeout of `ms`. */
+function testTimedOut(ms: number): string {
+  return `Test timed out in ${ms}ms.\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".`
+}
+
+/** Each test's name, outcome and reason in `<out>/verdict.json`. */
+function verdictOutcomes(out: string): unknown {
+  return (
+    JSON.parse(readFileSync(join(out, 'verdict.json'), 'utf8')) as {
+      tests: Array<{name: string; outcome?: string; reason?: string}>
+    }
+  ).tests.map(({name, outcome, reason}) => ({name, outcome, reason}))
+}
 
 describe(runOnDevice.name, () => {
   test('stops a hung failure dump before the retry starts', async () => {
@@ -163,8 +179,11 @@ describe('an adb process that outlives SIGKILL', () => {
 
 describe('a test.fails device test with the device setup file', () => {
   test('fails its file when the test times out while the driver still types', async () => {
-    expect(
-      await runSuite({
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    vi.stubEnv('THUMBJAR_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
         root,
         file: 'src/fixtures/suites/failing-empty-block.ts',
         setupFiles: [
@@ -172,21 +191,38 @@ describe('a test.fails device test with the device setup file', () => {
           'src/vitest/setup.ts',
         ],
         testTimeout: 1_000,
-      }),
-    ).toEqual({
-      file: 'failed',
-      errors: [
-        'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
-      ],
-      tests: [
-        {name: 'Scenario: Typing kyou into an empty block', state: 'passed'},
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect({result, verdict: verdictOutcomes(out)}).toEqual({
+      result: {
+        file: 'failed',
+        errors: [
+          'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
+        ],
+        tests: [
+          {name: 'Scenario: Typing kyou into an empty block', state: 'passed'},
+        ],
+      },
+      verdict: [
+        {
+          name: 'Scenario: Typing kyou into an empty block',
+          outcome: 'driver fault',
+          // The abort reason, written before the driver's cleanup settled.
+          reason: testTimedOut(1_000),
+        },
       ],
     })
   }, 30_000)
 
   test('fails its file when stopping Chrome after typing hangs until the test times out', async () => {
-    expect(
-      await runSuite({
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    vi.stubEnv('THUMBJAR_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
         root,
         file: 'src/fixtures/suites/failing-empty-block.ts',
         setupFiles: [
@@ -194,41 +230,76 @@ describe('a test.fails device test with the device setup file', () => {
           'src/vitest/setup.ts',
         ],
         testTimeout: 1_000,
-      }),
-    ).toEqual({
-      file: 'failed',
-      errors: [
-        'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
-      ],
-      tests: [
-        {name: 'Scenario: Typing kyou into an empty block', state: 'passed'},
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect({result, verdict: verdictOutcomes(out)}).toEqual({
+      result: {
+        file: 'failed',
+        errors: [
+          'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
+        ],
+        tests: [
+          {name: 'Scenario: Typing kyou into an empty block', state: 'passed'},
+        ],
+      },
+      verdict: [
+        {
+          name: 'Scenario: Typing kyou into an empty block',
+          outcome: 'driver fault',
+          // The abort reason, written before the driver's cleanup settled.
+          reason: testTimedOut(1_000),
+        },
       ],
     })
   }, 30_000)
 
   test('fails its file when the test times out and Chrome finishes stopping during the next test', async () => {
-    expect(
-      await runSuite({
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    vi.stubEnv('THUMBJAR_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
         root,
         file: 'src/fixtures/suites/timeout-then-late-cleanup.ts',
         setupFiles: [
           'src/fixtures/suites/chrome-stop-finishes-late.ts',
           'src/vitest/setup.ts',
         ],
-      }),
-    ).toEqual({
-      file: 'failed',
-      errors: [
-        'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block times out while Chrome stops", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
-      ],
-      tests: [
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect({result, verdict: verdictOutcomes(out)}).toEqual({
+      result: {
+        file: 'failed',
+        errors: [
+          'The driver never returned a result and cleaned up in "Scenario: Typing kyou into an empty block times out while Chrome stops", the test timed out or its cleanup failed. These tests are marked `test.fails`, which counts any error as the expected failure, so they say nothing about the editor.',
+        ],
+        tests: [
+          {
+            name: 'Scenario: Typing kyou into an empty block times out while Chrome stops',
+            state: 'passed',
+          },
+          {
+            name: 'Scenario: Chrome finishes stopping during the next test',
+            state: 'passed',
+          },
+        ],
+      },
+      verdict: [
         {
           name: 'Scenario: Typing kyou into an empty block times out while Chrome stops',
-          state: 'passed',
+          outcome: 'driver fault',
+          // The abort reason, written before the driver's cleanup settled.
+          reason: testTimedOut(500),
         },
         {
           name: 'Scenario: Chrome finishes stopping during the next test',
-          state: 'passed',
+          outcome: 'passed',
         },
       ],
     })
@@ -932,8 +1003,60 @@ describe('the step records of a `runOnDevice` call', () => {
 
 describe('a page exception in the read of a failed step', () => {
   test('ends the call on it before and after input and on the retry, and fails the file', async () => {
-    expect(
-      await runSuite({
+    // A verdict the run already wrote: another file's entry, another project's entry for this file and
+    // another project's entry for a file under its own root, which this file's entries join, this
+    // project's stale entry for this file, which they replace, and the entry of a test file deleted since,
+    // which is dropped.
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    const entry = {platform: 'android', outcome: 'passed', artifacts: []}
+    const earlier = {
+      ...entry,
+      project: '',
+      file: EVERY_OUTCOME,
+      name: 'Scenario: Passed',
+    }
+    const otherProject = {
+      ...entry,
+      platform: 'ios',
+      project: 'ios',
+      file: 'src/fixtures/suites/readback-page-exception.ts',
+      name: 'Scenario: On iOS',
+    }
+    const otherRoot = {
+      ...entry,
+      project: 'elsewhere',
+      file: 'tests/only-under-another-root.test.ts',
+      name: 'Scenario: Under another root',
+    }
+    writeFileSync(
+      join(out, 'verdict.json'),
+      JSON.stringify({
+        version: 1,
+        thumbjar: packageJson.version,
+        counts: {},
+        tests: [
+          earlier,
+          otherProject,
+          otherRoot,
+          {
+            ...entry,
+            project: '',
+            file: 'src/fixtures/suites/readback-page-exception.ts',
+            name: 'Scenario: Stale',
+          },
+          {
+            ...entry,
+            project: '',
+            file: 'src/fixtures/suites/deleted.ts',
+            name: 'Scenario: Deleted',
+          },
+        ],
+      }),
+    )
+    vi.stubEnv('THUMBJAR_FIXTURE_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
         root,
         file: 'src/fixtures/suites/readback-page-exception.ts',
         setupFiles: [
@@ -941,8 +1064,84 @@ describe('a page exception in the read of a failed step', () => {
           'src/vitest/setup.ts',
         ],
         testTimeout: 15_000,
-      }),
-    ).toEqual({
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+    const verdict = JSON.parse(readFileSync(join(out, 'verdict.json'), 'utf8'))
+
+    expect({
+      counts: verdict.counts,
+      tests: verdict.tests.map(
+        (test: {name: string; artifacts: string[]}) =>
+          ({...test, artifacts: test.artifacts.length}) as unknown,
+      ),
+    }).toEqual({
+      counts: {
+        'passed': 4,
+        'failed': 3,
+        'expected failure': 0,
+        'inconclusive': 0,
+        'device offline': 0,
+        'driver fault': 0,
+      },
+      tests: [
+        {...earlier, artifacts: 0},
+        {...otherProject, artifacts: 0},
+        {...otherRoot, artifacts: 0},
+        ...[
+          'Scenario: A page exception in the read of a step that failed before input ends the call on it',
+          'Scenario: A page exception in the read of a step that failed on the retry ends the call on it',
+        ].map((name) => ({
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/readback-page-exception.ts',
+          name,
+          outcome: 'failed',
+          reason: 'Uncaught in `window.__state()`: Error: getSnapshot failed',
+          firstDivergingStep: {
+            index: 0,
+            type: 'compose',
+            status: 'failed',
+            reason: 'Error: injected tap 2 was rejected',
+            keys: [],
+            events: [],
+            textAfter: null,
+          },
+          taps: [{keys: 0, events: 0}],
+          artifacts: name.includes('retry') ? 6 : 3,
+        })),
+        {
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/readback-page-exception.ts',
+          name: 'Scenario: A page exception in the read of a step that failed after input ends the call on it, not inconclusive',
+          outcome: 'failed',
+          reason: 'Uncaught in `window.__state()`: Error: getSnapshot failed',
+          firstDivergingStep: {
+            index: 0,
+            type: 'enter',
+            status: 'failed',
+            reason: 'Error: injected tap 2 was rejected',
+            keys: ['Enter'],
+            events: [],
+            textAfter: null,
+          },
+          taps: [{keys: 1, events: 0}],
+          artifacts: 3,
+        },
+        {
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/readback-page-exception.ts',
+          name: 'Scenario: Another error in the read of a failed step stays a diagnostic, and the call still retries',
+          outcome: 'passed',
+          taps: [{keys: 1, events: 0}],
+          artifacts: 5,
+        },
+      ],
+    })
+    expect(result).toEqual({
       file: 'failed',
       errors: [
         'The page threw while the driver typed, which can be an editor failure, so it is not retried: "Scenario: A page exception in the read of a step that failed before input ends the call on it": Uncaught in `window.__state()`: Error: getSnapshot failed, "Scenario: A page exception in the read of a step that failed on the retry ends the call on it": Uncaught in `window.__state()`: Error: getSnapshot failed, "Scenario: A page exception in the read of a step that failed after input ends the call on it, not inconclusive": Uncaught in `window.__state()`: Error: getSnapshot failed.',
@@ -1000,19 +1199,30 @@ describe('the job summary', () => {
       mkdtempSync(join(tmpdir(), 'thumbjar-summary-')),
       'summary.md',
     )
-    const result = await runSuite({
-      root,
-      file: 'src/fixtures/suites/every-outcome.ts',
-      setupFiles: [
-        'src/fixtures/suites/gboard-device.ts',
-        'src/vitest/setup.ts',
-        'src/fixtures/suites/summary-durations.ts',
-      ],
-      testTimeout: 15_000,
-      provide: {thumbjarSummaryFile: summaryFile},
-    })
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    vi.stubEnv('THUMBJAR_FIXTURE_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
+        root,
+        file: 'src/fixtures/suites/every-outcome.ts',
+        setupFiles: [
+          'src/fixtures/suites/gboard-device.ts',
+          'src/vitest/setup.ts',
+          'src/fixtures/suites/summary-durations.ts',
+        ],
+        testTimeout: 15_000,
+        provide: {thumbjarSummaryFile: summaryFile},
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
 
-    expect({result, summary: readFileSync(summaryFile, 'utf8')}).toEqual({
+    expect({
+      result,
+      summary: readFileSync(summaryFile, 'utf8'),
+      verdict: JSON.parse(readFileSync(join(out, 'verdict.json'), 'utf8')),
+    }).toEqual({
       result: {
         file: 'failed',
         errors: [],
@@ -1082,6 +1292,221 @@ describe('the job summary', () => {
         '',
         '',
       ].join('\n'),
+      verdict: {
+        version: 1,
+        thumbjar: packageJson.version,
+        counts: {
+          'passed': 4,
+          'failed': 1,
+          'expected failure': 2,
+          'inconclusive': 4,
+          'device offline': 1,
+          'driver fault': 1,
+        },
+        tests: [
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Passed',
+            outcome: 'passed',
+            taps: [{keys: 1, events: 0}],
+            artifacts: ['en-passed-keyboard.xml', 'en-passed.json'],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Failed',
+            outcome: 'failed',
+            reason: "expected 'foo\\n' to deeply equal 'foo'",
+            taps: [{keys: 1, events: 0}],
+            artifacts: ['en-failed-keyboard.xml', 'en-failed.json'],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Expected failure',
+            outcome: 'expected failure',
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-expected-failure-keyboard.xml',
+              'en-expected-failure.json',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Inconclusive after input',
+            outcome: 'inconclusive',
+            reason:
+              'the driver faulted after it sent input, so it was not retried',
+            firstDivergingStep: {
+              index: 0,
+              type: 'enter',
+              status: 'failed',
+              reason: 'Error: read 2 of the page failed',
+              keys: ['Enter'],
+              events: [],
+              textAfter: null,
+            },
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-inconclusive-after-input-fail.xml',
+              'en-inconclusive-after-input-keyboard.xml',
+              'en-inconclusive-after-input.json',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Device offline',
+            outcome: 'device offline',
+            reason:
+              'adb lost the device, so it was not retried: adb shell dumpsys input_method exited with 1: error: device offline',
+            artifacts: ['en-device-offline-fail.xml'],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Driver fault',
+            outcome: 'driver fault',
+            reason: 'read 1 of the page failed',
+            artifacts: [
+              'en-driver-fault-fail.xml',
+              'en-driver-fault-keyboard.xml',
+              'en-driver-fault-retry-fail.xml',
+              'en-driver-fault-retry-keyboard.xml',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Inconclusive while the device answered',
+            outcome: 'inconclusive',
+            // The restart, not the first attempt's read, ended the call inconclusive.
+            reason:
+              'the restart before the retry did not show a fresh Chrome: adb timed out during the Chrome restart: adb shell pidof com.android.chrome ran past 5s before the restart, old pid unread, new pid unread',
+            artifacts: [
+              'en-inconclusive-while-the-device-answered-fail.xml',
+              'en-inconclusive-while-the-device-answered-keyboard.xml',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Inconclusive while the device was not checked',
+            outcome: 'inconclusive',
+            // The restart, not the first attempt's read, ended the call inconclusive.
+            reason:
+              'the restart before the retry did not show a fresh Chrome: adb timed out during the Chrome restart: adb shell pidof com.android.chrome ran past 5s before the restart, old pid unread, new pid unread',
+            artifacts: [
+              'en-inconclusive-while-the-device-was-not-checked-fail.xml',
+              'en-inconclusive-while-the-device-was-not-checked-keyboard.xml',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Passed without a driver call',
+            outcome: 'passed',
+            artifacts: [],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Scenario: Passed on its last call after a driver fault',
+            outcome: 'passed',
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-passed-on-its-last-call-after-a-driver-fault-fail.xml',
+              'en-passed-on-its-last-call-after-a-driver-fault-keyboard.xml',
+              'en-passed-on-its-last-call-after-a-driver-fault-retry-fail.xml',
+              'en-passed-on-its-last-call-after-a-driver-fault-retry-keyboard.xml',
+              'en-passed-on-its-last-call-after-a-driver-fault.json',
+            ],
+          },
+          // The two tests named "Scenario: Passed in a group" share their artifacts' names, and each lists
+          // only the files its own call wrote.
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'A group > Scenario: Passed in a group',
+            outcome: 'passed',
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-passed-in-a-group-keyboard.xml',
+              'en-passed-in-a-group.json',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'A group > Scenario: Expected failure in a group',
+            outcome: 'expected failure',
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-expected-failure-in-a-group-keyboard.xml',
+              'en-expected-failure-in-a-group.json',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'Another group > Scenario: Passed in a group',
+            outcome: 'inconclusive',
+            reason:
+              'the driver faulted after it sent input, so it was not retried',
+            firstDivergingStep: {
+              index: 0,
+              type: 'enter',
+              status: 'failed',
+              reason: 'Error: read 2 of the page failed',
+              keys: ['Enter'],
+              events: [],
+              textAfter: null,
+            },
+            taps: [{keys: 1, events: 0}],
+            artifacts: [
+              'en-passed-in-a-group-fail.xml',
+              'en-passed-in-a-group-keyboard.xml',
+              'en-passed-in-a-group.json',
+            ],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'A group that runs nothing > Scenario: Skipped',
+            artifacts: [],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'A group that runs nothing > Scenario: Todo',
+            artifacts: [],
+          },
+          {
+            project: '',
+            platform: 'android',
+            file: EVERY_OUTCOME,
+            name: 'A group that runs nothing > Scenario: A case Gboard cannot drive',
+            artifacts: [],
+          },
+        ],
+      },
     })
   }, 60_000)
 
@@ -1318,4 +1743,91 @@ test('page actions share whole-case retry and input boundaries', async () => {
       },
     ],
   })
+})
+
+describe('verdict.json', () => {
+  test("lists the files every call of a test wrote in this run, and quotes the driver's reason for an outcome the driver decided", async () => {
+    const out = mkdtempSync(join(tmpdir(), 'thumbjar-verdict-'))
+    // An earlier run's files, which no call of this run writes. The second test's files also start with
+    // the first test's artifact name, and are not the first test's either.
+    writeFileSync(join(out, 'en-two-calls-fail.xml'), '')
+    writeFileSync(join(out, 'ja-two-calls-retry.json'), '{}')
+    vi.stubEnv('THUMBJAR_FIXTURE_OUT_DIR', out)
+    let result: Awaited<ReturnType<typeof runSuite>>
+    try {
+      result = await runSuite({
+        root,
+        file: 'src/fixtures/suites/verdict-calls.ts',
+        setupFiles: [
+          'src/fixtures/suites/gboard-device.ts',
+          'src/vitest/setup.ts',
+        ],
+        testTimeout: 15_000,
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect({
+      result,
+      tests: JSON.parse(readFileSync(join(out, 'verdict.json'), 'utf8')).tests,
+    }).toEqual({
+      result: {
+        file: 'failed',
+        errors: [],
+        tests: [
+          {name: 'Scenario: Two calls', state: 'passed'},
+          {name: 'Scenario: Two calls retry', state: 'failed'},
+          {name: 'Scenario: Caught driver fault', state: 'failed'},
+        ],
+      },
+      tests: [
+        {
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/verdict-calls.ts',
+          name: 'Scenario: Two calls',
+          outcome: 'passed',
+          taps: [{keys: 1, events: 0}],
+          artifacts: [
+            'en-two-calls-keyboard.xml',
+            'en-two-calls.json',
+            'ja-two-calls-keyboard.xml',
+            'ja-two-calls.json',
+          ],
+        },
+        {
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/verdict-calls.ts',
+          name: 'Scenario: Two calls retry',
+          outcome: 'device offline',
+          // The restart before the retry lost the device, not the first attempt's mistap.
+          reason:
+            'adb lost the device, so it was not retried: adb shell am force-stop com.android.chrome exited with 1: error: device offline',
+          taps: [{keys: 1, events: 1}],
+          artifacts: [
+            'en-two-calls-retry-fail.xml',
+            'en-two-calls-retry-keyboard.xml',
+            'en-two-calls-retry.json',
+          ],
+        },
+        {
+          project: '',
+          platform: 'android',
+          file: 'src/fixtures/suites/verdict-calls.ts',
+          name: 'Scenario: Caught driver fault',
+          outcome: 'driver fault',
+          // The fault the call threw, not the assertion the test failed on after it caught it.
+          reason: 'read 1 of the page failed',
+          artifacts: [
+            'en-caught-driver-fault-fail.xml',
+            'en-caught-driver-fault-keyboard.xml',
+            'en-caught-driver-fault-retry-fail.xml',
+            'en-caught-driver-fault-retry-keyboard.xml',
+          ],
+        },
+      ],
+    })
+  }, 60_000)
 })

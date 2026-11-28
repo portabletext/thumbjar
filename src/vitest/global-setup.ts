@@ -1,4 +1,6 @@
+import {rmSync} from 'node:fs'
 import {createRequire} from 'node:module'
+import {join} from 'node:path'
 import type {TestProject} from 'vitest/node'
 import {adb} from '../device/adb.ts'
 import {
@@ -7,13 +9,32 @@ import {
 } from '../device/budget.ts'
 
 /**
- * Fail before any test when there is no device to type on or no page to open.
+ * Remove the `verdict.json` an earlier run left in the project's out directory, then fail before any test
+ * when there is no device to type on or no page to open.
  *
  * @public
  */
 export default async function setup(
-  project: Pick<TestProject, 'getProvidedContext'>,
+  project: Pick<TestProject, 'getProvidedContext'> & {
+    config?: {env?: Record<string, unknown>}
+  },
 ): Promise<void> {
+  // Each test file merges its tests into the file, so one left from an earlier run would keep its files.
+  // The verdict is a diagnostic, so failing to remove it never fails the run.
+  if (project.config !== undefined) {
+    const outDir = project.config.env?.THUMBJAR_OUT_DIR
+    const verdict = join(
+      typeof outDir === 'string' ? outDir : 'out',
+      'verdict.json',
+    )
+    try {
+      rmSync(verdict, {force: true})
+    } catch (error) {
+      console.warn(
+        `${verdict} from an earlier run not removed: ${String(error)}`,
+      )
+    }
+  }
   const {
     thumbjarPageUrl: pageUrl,
     thumbjarPageHint: pageHint,

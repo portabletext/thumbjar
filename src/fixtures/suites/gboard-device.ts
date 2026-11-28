@@ -551,4 +551,7 @@ declare global {
   var gboardDevice: typeof device
 }
 globalThis.gboardDevice = device
-process.env.THUMBJAR_OUT_DIR = mkdtempSync(join(tmpdir(), 'thumbjar-device-'))
+// A test that reads the artifacts names the directory in `THUMBJAR_FIXTURE_OUT_DIR`.
+process.env.THUMBJAR_OUT_DIR =
+  process.env.THUMBJAR_FIXTURE_OUT_DIR ??
+  mkdtempSync(join(tmpdir(), 'thumbjar-device-'))

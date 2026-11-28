@@ -1,5 +1,7 @@
 import {
   chmodSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -124,6 +126,50 @@ describe('the global setup', () => {
       inBound: true,
     })
   }, 10_000)
+
+  test("removes the verdict an earlier run left in the project's out directory", async () => {
+    const out = join(directory, 'out')
+    mkdirSync(out)
+    writeFileSync(join(out, 'verdict.json'), '{}')
+    vi.stubEnv('PATH', directory)
+
+    await expect(
+      globalSetup({
+        config: {env: {THUMBJAR_OUT_DIR: out}},
+        getProvidedContext: () => ({
+          thumbjarPageUrl: 'http://localhost:8765/editor.html',
+          thumbjarPageHint: 'Serve it.',
+        }),
+      }),
+    ).rejects.toThrow('adb is not on PATH')
+    expect(existsSync(join(out, 'verdict.json'))).toEqual(false)
+  })
+
+  test('warns and goes on when the verdict cannot be removed', async () => {
+    const out = join(directory, 'out')
+    mkdirSync(join(out, 'verdict.json'), {recursive: true})
+    vi.stubEnv('PATH', directory)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await expect(
+        globalSetup({
+          config: {env: {THUMBJAR_OUT_DIR: out}},
+          getProvidedContext: () => ({
+            thumbjarPageUrl: 'http://localhost:8765/editor.html',
+            thumbjarPageHint: 'Serve it.',
+          }),
+        }),
+      ).rejects.toThrow('adb is not on PATH')
+      expect(warn.mock.calls).toEqual([
+        [
+          `${join(out, 'verdict.json')} from an earlier run not removed: SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${join(out, 'verdict.json')}`,
+        ],
+      ])
+    } finally {
+      warn.mockRestore()
+    }
+  })
 
   test('names a missing adb', async () => {
     vi.stubEnv('PATH', directory)

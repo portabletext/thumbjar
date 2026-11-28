@@ -1,7 +1,17 @@
-import {beforeEach, expect, test, vi} from 'vitest'
+import {mkdtempSync, writeFileSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import {sleep} from '../device/util.ts'
-import {driverRuns, runOnDevice} from '../driver.ts'
-import type {PageEvent, Step} from '../steps.ts'
+import {
+  driverRuns,
+  failedStepRecords,
+  runOnDevice,
+  slug,
+  testArtifacts,
+  thrownFault,
+} from '../driver.ts'
+import type {PageEvent, RunOnDeviceOptions, Step} from '../steps.ts'
 import {runOnSimulator} from './typing.ts'
 
 const device = vi.hoisted(() => ({
@@ -12,6 +22,7 @@ const device = vi.hoisted(() => ({
   taps: [] as string[],
   dropped: false,
   keyboard: 'ja',
+  saveScreenshot: vi.fn(),
 }))
 
 vi.mock('vitest', async (importOriginal) => ({
@@ -27,6 +38,11 @@ vi.mock('../device/util.ts', async (importOriginal) => ({
 vi.mock('webdriverio', () => ({remote: device.remote}))
 
 beforeEach(() => {
+  vi.stubEnv('THUMBJAR_OUT_DIR', mkdtempSync(join(tmpdir(), 'thumbjar-ios-')))
+  // Writes the file, as WebDriver does.
+  device.saveScreenshot.mockReset().mockImplementation((path: string) => {
+    writeFileSync(path, 'png')
+  })
   device.events = [{type: 'focus'}]
   device.text = ''
   device.taps = []
@@ -85,9 +101,13 @@ beforeEach(() => {
       }
     },
     getPageSource: () => '<page/>',
-    saveScreenshot: () => {},
+    saveScreenshot: device.saveScreenshot,
     deleteSession: () => {},
   })
+})
+
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 test('skips the whole case before opening a session when a later step is unsupported', async (context) => {
@@ -321,4 +341,121 @@ test('an iOS fault after a typing tap ends inconclusive', async (context) => {
   ).rejects.toThrow('did not offer the candidate')
   expect(driverRuns.at(-1)?.state).toEqual('inconclusive')
   expect(device.taps).toEqual(['k', 'y', 'o', 'u'])
+})
+
+test("lists the page source, screenshot and result JSON of each of a test's calls", async (context) => {
+  device.keyboard = 'en'
+  for (const prefix of ['', 'foo']) {
+    await runOnDevice(context, {
+      url: 'http://localhost:8765/editor.html',
+      keyboard: 'en',
+      prefix,
+      steps: [{type: 'compose', letters: 'foo', commit: 'space'}],
+    })
+  }
+  device.keyboard = 'ja'
+  device.candidate.mockReturnValue(true)
+  await runOnDevice(context, {
+    url: 'http://localhost:8765/editor.html',
+    keyboard: 'ja',
+    prefix: '',
+    steps: [{type: 'compose', letters: 'kyou', commit: {candidate: '今日'}}],
+  })
+
+  const name = slug(context.task.name)
+  expect({
+    artifacts: testArtifacts(context.task),
+    records: failedStepRecords(driverRuns.at(-1)!),
+  }).toEqual({
+    artifacts: [
+      `en-${name}.json`,
+      `en-${name}.png`,
+      `en-${name}.xml`,
+      `ja-${name}.json`,
+      `ja-${name}.png`,
+      `ja-${name}.xml`,
+    ],
+    records: undefined,
+  })
+})
+
+test('keeps the step records of a failed step for the verdict, and lists no screenshot that failed', async (context) => {
+  device.saveScreenshot.mockRejectedValue(new Error('screenshot failed'))
+  await expect(
+    runOnDevice(context, {
+      url: 'http://localhost:8765/editor.html',
+      keyboard: 'ja',
+      prefix: '',
+      steps: [
+        {type: 'compose', letters: 'kyou', commit: {candidate: '今日'}},
+        {type: 'compose', letters: 'foo'},
+      ],
+    }),
+  ).rejects.toThrow('did not offer the candidate')
+
+  const run = driverRuns.at(-1)!
+  const name = slug(context.task.name)
+  expect({
+    artifacts: testArtifacts(context.task),
+    records: failedStepRecords(run)?.map(({status, keys, reason}) => ({
+      status,
+      keys,
+      reason,
+    })),
+    fault: thrownFault(run),
+  }).toEqual({
+    artifacts: [`ja-${name}.json`, `ja-${name}.xml`],
+    records: [
+      {
+        status: 'failed',
+        keys: ['k', 'y', 'o', 'u'],
+        reason:
+          "Error: iOS keyboard did not offer the candidate '今日' in step 1, candidates ['きょう']",
+      },
+      {status: 'skipped', keys: [], reason: 'step 1 failed'},
+    ],
+    fault: expect.stringMatching(
+      /^iOS keyboard did not offer the candidate '今日' in step 1/,
+    ),
+  })
+})
+
+test("records the abort reason of a test that times out before the driver's cleanup settles, also for a call waiting behind it", async (context) => {
+  const controller = new AbortController()
+  const reason = new Error('Test timed out in 100ms.')
+  let openSession!: () => void
+  const session = device.remote.getMockImplementation()
+  device.remote.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        openSession = () => resolve(session!())
+      }),
+  )
+  const options = {
+    url: 'http://localhost:8765/editor.html',
+    keyboard: 'en',
+    prefix: '',
+    steps: [{type: 'compose', letters: 'foo', commit: 'space'}],
+  } satisfies RunOnDeviceOptions
+  const timedOut = {...context, signal: controller.signal}
+  const earlier = driverRuns.length
+  const first = runOnDevice(timedOut, options)
+  first.catch(() => {})
+  await vi.waitFor(() => expect(openSession).toBeTypeOf('function'))
+  const queued = runOnDevice(timedOut, options)
+  queued.catch(() => {})
+  await vi.waitFor(() => expect(driverRuns.length).toEqual(earlier + 2))
+  const [firstRun, queuedRun] = driverRuns.slice(earlier)
+
+  controller.abort(reason)
+
+  // Both calls are still pending: the first waits on its session, the second behind the first.
+  expect([thrownFault(firstRun!), thrownFault(queuedRun!)]).toEqual([
+    'Test timed out in 100ms.',
+    'Test timed out in 100ms.',
+  ])
+  openSession()
+  await expect(first).rejects.toBe(reason)
+  await expect(queued).rejects.toBe(reason)
+  expect([firstRun!.state, queuedRun!.state]).toEqual(['aborted', 'aborted'])
 })

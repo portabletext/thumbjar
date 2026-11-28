@@ -3,7 +3,7 @@
 // answering.
 
 import {createHash} from 'node:crypto'
-import {readFileSync, writeFileSync} from 'node:fs'
+import {readFileSync} from 'node:fs'
 import {
   adb,
   AdbConnection,
@@ -20,6 +20,7 @@ import {
   sleep,
   throwIfAborted,
   tracked,
+  writeArtifact,
 } from './util.ts'
 
 const DEVICE_JAR = '/data/local/tmp/u2.jar'
@@ -263,14 +264,14 @@ export class Device {
     const data = await this.rpc('takeScreenshot', [1, 80])
     throwIfAborted()
     if (typeof data === 'string' && data) {
-      writeFileSync(`${base}.jpg`, Buffer.from(data, 'base64'))
+      writeArtifact(`${base}.jpg`, Buffer.from(data, 'base64'))
       return
     }
     const png = await tracked('screencap', () =>
       AdbConnection.service('exec:screencap -p', 60),
     )
     try {
-      writeFileSync(`${base}.png`, await png.readUntil(() => false))
+      writeArtifact(`${base}.png`, await png.readUntil(() => false))
     } finally {
       png.close()
     }
