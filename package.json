@@ -1,6 +1,6 @@
 {
   "name": "thumbjar",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Test rich text editors against a real Android or iOS keyboard",
   "keywords": [
     "android",
