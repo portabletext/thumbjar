@@ -6,7 +6,7 @@ Device tests run on GitHub's `ubuntu-latest` runners with an x86_64 Android emul
 
 The `portabletext/thumbjar/android` action boots the emulator, runs one device test file on it and uploads the diagnostics. It retries once on a fresh emulator when the first one fails as infrastructure. It needs thumbjar 1.1.0 or later installed in `working-directory`.
 
-No release tag contains the action yet. Until one does, reference `@main`. Once 1.1.0 is released, pin the tag that matches your installed thumbjar version, such as `@v1.1.0`.
+Reference the action as `@v1`. The `v1` tag moves to every 1.x release, so it always matches the latest thumbjar 1.x on npm. Pin an exact release tag such as `@v1.1.0` if you want the action to match a locked thumbjar version.
 
 ```yaml
 jobs:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Run on emulator
         timeout-minutes: ${{ matrix.actionMinutes }}
-        uses: portabletext/thumbjar/android@main
+        uses: portabletext/thumbjar/android@v1
         with:
           test: tests/${{ matrix.lang }}.test.ts
           keyboard: ${{ matrix.lang }}
